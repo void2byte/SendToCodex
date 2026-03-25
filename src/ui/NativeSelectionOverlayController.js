@@ -26,6 +26,7 @@ class NativeSelectionOverlayController {
     this.lastOfferedKeys = new Map();
     this.pendingDescriptors = new Map();
     this.popupInFlight = false;
+    this.activePopupSource = undefined;
     this.terminalIntervalHandle = undefined;
     this.terminalIds = new WeakMap();
     this.nextTerminalId = 1;
@@ -184,6 +185,7 @@ class NativeSelectionOverlayController {
     }
 
     this.popupInFlight = true;
+    this.activePopupSource = descriptor.source;
     this.lastOfferedKeys.set(descriptor.source, descriptor.key);
 
     this.logger &&
@@ -222,6 +224,7 @@ class NativeSelectionOverlayController {
         );
       }
     } finally {
+      this.activePopupSource = undefined;
       this.popupInFlight = false;
       await this.flushPendingDescriptors();
     }
@@ -255,6 +258,10 @@ class NativeSelectionOverlayController {
     this.clearScheduledTimer(source);
     if (!hadState) {
       return;
+    }
+
+    if (this.activePopupSource === source && this.popupPresenter) {
+      this.popupPresenter.dispose();
     }
 
     this.logger &&

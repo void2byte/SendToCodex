@@ -18,7 +18,7 @@ const WS_TABSTOP = 0x00010000;
 const WS_CLIPCHILDREN = 0x02000000;
 const WS_EX_TOPMOST = 0x00000008;
 const WS_EX_TOOLWINDOW = 0x00000080;
-const SW_SHOW = 5;
+const SW_SHOWNOACTIVATE = 4;
 const COLOR_3DFACE = 15;
 const WM_ACTIVATE = 0x0006;
 const WM_CLOSE = 0x0010;
@@ -86,9 +86,6 @@ const GetSysColorBrush =
 const PostQuitMessage = user32 && user32.func('void __stdcall PostQuitMessage(int nExitCode)');
 const RegisterClassW =
   user32 && user32.func('uint16_t __stdcall RegisterClassW(const WNDCLASSW *lpWndClass)');
-const SetFocus = user32 && user32.func('HWND __stdcall SetFocus(HWND hWnd)');
-const SetForegroundWindow =
-  user32 && user32.func('bool __stdcall SetForegroundWindow(HWND hWnd)');
 const ShowWindow = user32 && user32.func('bool __stdcall ShowWindow(HWND hWnd, int nCmdShow)');
 const TranslateMessage = user32 && user32.func('bool __stdcall TranslateMessage(const MSG *lpMsg)');
 const UnregisterClassW =
@@ -200,7 +197,7 @@ function showPopupAction(payload) {
       WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
       className,
       '',
-      WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
+      WS_POPUP | WS_CLIPCHILDREN,
       position.x,
       position.y,
       WINDOW_WIDTH,
@@ -267,13 +264,8 @@ function showPopupAction(payload) {
     }
 
     if (ShowWindow) {
-      ShowWindow(windowHandle, SW_SHOW);
-    }
-    if (SetForegroundWindow) {
-      SetForegroundWindow(windowHandle);
-    }
-    if (SetFocus) {
-      SetFocus(actionButton);
+      // Keep focus in VS Code so the popup does not interrupt typing/editing.
+      ShowWindow(windowHandle, SW_SHOWNOACTIVATE);
     }
 
     const message = {};

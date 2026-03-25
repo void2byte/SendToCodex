@@ -1,6 +1,6 @@
 {
   "name": "codex-terminal-recorder",
-  "displayName": "Codex Terminal Recorder",
+  "displayName": "Send to Codex",
   "description": "Keeps a rolling per-terminal text recording with the latest integrated terminal output.",
   "version": "0.0.1",
   "publisher": "local",
@@ -36,27 +36,27 @@
     "commands": [
       {
         "command": "codexTerminalRecorder.openLogDirectory",
-        "title": "Codex Terminal Recorder: Open Log Directory"
+        "title": "Send to Codex: Open Log Directory"
       },
       {
         "command": "codexTerminalRecorder.openSettings",
-        "title": "Codex Terminal Recorder: Open Settings"
+        "title": "Send to Codex: Open Settings"
       },
       {
         "command": "codexTerminalRecorder.openDiagnosticsLog",
-        "title": "Codex Terminal Recorder: Open Diagnostics Log"
+        "title": "Send to Codex: Open Diagnostics Log"
       },
       {
         "command": "codexTerminalRecorder.openActiveTerminalLog",
-        "title": "Codex Terminal Recorder: Open Active Terminal Log"
+        "title": "Send to Codex: Open Active Terminal Log"
       },
       {
         "command": "codexTerminalRecorder.toggleDiagnosticsLogging",
-        "title": "Codex Terminal Recorder: Toggle Diagnostics Logging"
+        "title": "Send to Codex: Toggle Diagnostics Logging"
       },
       {
         "command": "codexTerminalRecorder.toggleDiagnosticsLogFile",
-        "title": "Codex Terminal Recorder: Toggle Diagnostics Log File"
+        "title": "Send to Codex: Toggle Diagnostics Log File"
       },
       {
         "command": "codexTerminalRecorder.addExplorerResourceToCodexChat",
@@ -70,17 +70,17 @@
       },
       {
         "command": "codexTerminalRecorder.locateActiveTerminalSelection",
-        "title": "Codex Terminal Recorder: Locate Active Terminal Selection"
+        "title": "Send to Codex: Locate Active Terminal Selection"
       },
       {
         "command": "codexTerminalRecorder.sendActiveEditorSelectionToCodexChat",
-        "title": "Send Editor Selection to Codex Chat",
+        "title": "Send Selection to Codex",
         "category": "Codex",
         "icon": "$(code)"
       },
       {
         "command": "codexTerminalRecorder.sendActiveTerminalSelectionToCodexChat",
-        "title": "Send Terminal Context to Codex Chat",
+        "title": "Send to Codex",
         "category": "Codex",
         "icon": "$(comment-discussion)"
       }
@@ -121,7 +121,7 @@
       }
     ],
     "configuration": {
-      "title": "Codex Terminal Recorder",
+      "title": "Send to Codex",
       "properties": {
         "codexTerminalRecorder.enabled": {
           "order": 1,

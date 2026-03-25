@@ -3,7 +3,7 @@
 const vscode = require('vscode');
 
 const CONFIG_SECTION = 'codexTerminalRecorder';
-const OUTPUT_CHANNEL_NAME = 'Codex Terminal Recorder';
+const OUTPUT_CHANNEL_NAME = 'Send to Codex';
 const PROPOSED_API_HINT =
   'Terminal capture requires VS Code Insiders (or extension development mode) with --enable-proposed-api=local.codex-terminal-recorder.';
 const DIAGNOSTICS_LOGGING_ENABLED_DEFAULT = false;

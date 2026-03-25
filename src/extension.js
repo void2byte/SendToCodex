@@ -28,7 +28,7 @@ function activate(context) {
 
   const logger = new FileLogger(context.logUri.fsPath, output);
   logger.reloadConfiguration();
-  logger.info('Codex Terminal Recorder extension activated.', {
+  logger.info('Send to Codex extension activated.', {
     vscodeVersion: vscode.version,
     logFilePath: logger.logFilePath
   });
@@ -121,7 +121,7 @@ function activate(context) {
         );
         logger.reloadConfiguration();
         void vscode.window.showInformationMessage(
-          `Codex Terminal Recorder diagnostics logging ${enabled ? 'enabled' : 'disabled'}.`
+          `Send to Codex diagnostics logging ${enabled ? 'enabled' : 'disabled'}.`
         );
       }
     ),
@@ -149,7 +149,7 @@ function activate(context) {
 
         logger.reloadConfiguration();
         void vscode.window.showInformationMessage(
-          `Codex Terminal Recorder diagnostics log file ${next ? 'enabled' : 'disabled'}.`
+          `Send to Codex diagnostics log file ${next ? 'enabled' : 'disabled'}.`
         );
       }),
     vscode.commands.registerCommand(

@@ -12,7 +12,7 @@ class RecorderSettingsStatusBarController {
       998
     );
     this.statusBarItem.command = 'codexTerminalRecorder.openSettings';
-    this.statusBarItem.name = 'Codex Terminal Recorder Settings';
+    this.statusBarItem.name = 'Send to Codex Settings';
     this.disposables = [];
     this.lastVisibilityState = undefined;
   }
@@ -38,10 +38,9 @@ class RecorderSettingsStatusBarController {
     const terminalsWithOutput = this.terminalLogManager.getCapturedOutputTerminalCount();
     const terminalLabel = capturedTerminalCount === 1 ? 'terminal' : 'terminals';
 
-    this.statusBarItem.text =
-      `$(settings-gear) Codex Recorder: ${capturedTerminalCount} ${terminalLabel}`;
+    this.statusBarItem.text = `$(settings-gear) Send to Codex: ${capturedTerminalCount} ${terminalLabel}`;
     this.statusBarItem.tooltip =
-      `Open Codex Terminal Recorder settings. Tracking ${capturedTerminalCount} ${terminalLabel}; ` +
+      `Open Send to Codex settings. Tracking ${capturedTerminalCount} ${terminalLabel}; ` +
       `${terminalsWithOutput} currently have captured output.`;
     this.statusBarItem.show();
     this.logVisibilityState('visible', capturedTerminalCount);

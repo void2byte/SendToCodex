@@ -1,4 +1,4 @@
-# Codex Terminal Recorder
+# Send to Codex
 
 Local VS Code extension that keeps a rolling plain-text record for each integrated terminal.
 
@@ -19,15 +19,15 @@ Local VS Code extension that keeps a rolling plain-text record for each integrat
 - `indexedTerminalSelectionSearch`: read the current terminal selection and resolve it with the plain-text log plus the line index sidecar.
 - `clipboardTextSearch`: read copied terminal text from the clipboard and search in the plain-text log.
 
-Use the `Codex Terminal Recorder: Locate Active Terminal Selection` command to test the currently selected strategy.
-Use `Send Terminal Context to Codex Chat` to send the resolved terminal context to Codex.
+Use the `Send to Codex: Locate Active Terminal Selection` command to test the currently selected strategy.
+Use `Send to Codex` to send the resolved terminal context to Codex.
 Use `codexTerminalRecorder.terminalContextSendMode` to choose between a structured Markdown context bundle, a separate attachment file, and the legacy editor-selection flow.
 Use `codexTerminalRecorder.attachSnapshotFileInContextBundle` to control whether `contextBundle` also attaches the full terminal snapshot `.txt` file.
 On Windows, the extension can surface a compact native popup action near the cursor for editor and terminal selections, with a close action on the right edge.
 The `Ctrl+Shift+L` shortcut remains available for both editor and terminal selections.
 The optional status bar buttons are kept as a disabled-by-default fallback and can be enabled in settings.
 When Codex is available, the status bar also shows a settings badge with the number of currently captured terminals.
-Use `Codex Terminal Recorder: Open Diagnostics Log` to inspect the extension file log.
+Use `Send to Codex: Open Diagnostics Log` to inspect the extension file log.
 
 ## Current limitation
 

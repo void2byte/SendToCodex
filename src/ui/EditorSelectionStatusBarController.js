@@ -16,7 +16,7 @@ class EditorSelectionStatusBarController {
       999
     );
     this.statusBarItem.command = SEND_EDITOR_TO_CODEX_COMMAND;
-    this.statusBarItem.name = 'Codex Editor Selection';
+    this.statusBarItem.name = 'Send Selection to Codex';
     this.disposables = [];
     this.lastVisibilityState = undefined;
   }
@@ -57,7 +57,7 @@ class EditorSelectionStatusBarController {
       return;
     }
 
-    this.statusBarItem.text = `$(code) Send Editor to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
+    this.statusBarItem.text = `$(code) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
     this.statusBarItem.tooltip = 'Send the active editor selection to Codex Chat.';
     this.statusBarItem.show();
     this.logVisibilityState('visible');

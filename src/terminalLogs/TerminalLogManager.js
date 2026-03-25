@@ -157,7 +157,7 @@ class TerminalLogManager {
     if (notify) {
       const status = this.configuration.enabled ? 'enabled' : 'disabled';
       vscode.window.setStatusBarMessage(
-        `Codex Terminal Recorder ${status}, ${formatMegabytes(this.configuration.maxBytes)} MB per terminal`,
+        `Send to Codex ${status}, ${formatMegabytes(this.configuration.maxBytes)} MB per terminal`,
         3000
       );
     }

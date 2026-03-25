@@ -17,7 +17,7 @@ class TerminalSelectionStatusBarController {
       1000
     );
     this.statusBarItem.command = SEND_TO_CODEX_COMMAND;
-    this.statusBarItem.name = 'Codex Terminal Selection';
+    this.statusBarItem.name = 'Send to Codex';
     this.intervalHandle = undefined;
     this.lastVisibilityState = undefined;
   }
@@ -53,8 +53,7 @@ class TerminalSelectionStatusBarController {
       return;
     }
 
-    this.statusBarItem.text =
-      `$(comment-discussion) Send Terminal to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
+    this.statusBarItem.text = `$(comment-discussion) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
     this.statusBarItem.tooltip =
       'Send the resolved terminal selection context to Codex Chat.';
     this.statusBarItem.show();
