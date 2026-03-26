@@ -1,5 +1,3 @@
-![ezgif-666ed7ed9c4d2843](https://github.com/user-attachments/assets/17727aad-e997-42b6-8c34-e566323cedef)
-
 # Send to Codex
 
 VS Code extension that captures integrated terminal output, resolves terminal selections back to recorded source lines, and sends the result to Codex.
