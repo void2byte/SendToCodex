@@ -139,20 +139,14 @@
             "editorSelection"
           ],
           "enumDescriptions": [
-            "Recommended mode: attach a structured Markdown context bundle with the related terminal command, the selected text, the exact source line range, and deduplicated nearby context. You can separately choose whether to also attach the full terminal snapshot file.",
+            "Recommended mode: attach a structured Markdown context bundle with the related terminal command, the selected text, the exact source line range, deduplicated nearby context, and a path to the immutable terminal snapshot file for this selection.",
             "Current mode: the editor stays closed and Codex receives a separate attachment file with the selected terminal context.",
             "Legacy mode: the extension opens the snapshot .txt, selects the needed lines there, and sends them as an editor selection like a normal editor selection."
           ],
           "description": "Choose how terminal context is sent to Codex."
         },
-        "codexTerminalRecorder.attachSnapshotFileInContextBundle": {
-          "order": 3,
-          "type": "boolean",
-          "default": true,
-          "description": "When terminalContextSendMode is contextBundle, also attach the full terminal snapshot .txt file alongside the compact Markdown bundle."
-        },
         "codexTerminalRecorder.selectionTrackingStrategy": {
-          "order": 4,
+          "order": 3,
           "type": "string",
           "default": "terminalSelectionTextSearch",
           "enum": [
@@ -168,7 +162,7 @@
           "description": "Choose how terminal selection text is captured and mapped back to the terminal log files."
         },
         "codexTerminalRecorder.selectionContextLines": {
-          "order": 5,
+          "order": 4,
           "type": "number",
           "default": 3,
           "minimum": 0,
@@ -176,31 +170,31 @@
           "description": "Number of surrounding lines to include around the resolved terminal selection when preparing context for Codex."
         },
         "codexTerminalRecorder.showNativeTerminalSelectionPopup": {
-          "order": 6,
+          "order": 5,
           "type": "boolean",
           "default": true,
           "description": "Show a native Windows popup action near the cursor when terminal text selection becomes available."
         },
         "codexTerminalRecorder.showNativeEditorSelectionPopup": {
-          "order": 7,
+          "order": 6,
           "type": "boolean",
           "default": true,
           "description": "Show a native Windows popup action near the cursor when editor text selection becomes available."
         },
         "codexTerminalRecorder.showCodexSelectionButton": {
-          "order": 8,
+          "order": 7,
           "type": "boolean",
           "default": false,
           "description": "Show a fallback status bar button for sending the active terminal selection to Codex Chat."
         },
         "codexTerminalRecorder.showCodexEditorSelectionButton": {
-          "order": 9,
+          "order": 8,
           "type": "boolean",
           "default": false,
           "description": "Show a fallback status bar button for sending the active editor selection to Codex Chat."
         },
         "codexTerminalRecorder.maxFileSizeMb": {
-          "order": 10,
+          "order": 9,
           "type": "number",
           "default": 1,
           "minimum": 0.1,
@@ -208,19 +202,19 @@
           "description": "Maximum size in megabytes to keep per terminal recording file."
         },
         "codexTerminalRecorder.logDirectory": {
-          "order": 11,
+          "order": 10,
           "type": "string",
-          "default": ".codex-terminal-logs",
-          "markdownDescription": "Directory where terminal recording files are stored. Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
+          "default": "",
+          "markdownDescription": "Directory where terminal recording files are stored. Leave empty to use the extension storage directory outside the workspace (recommended). Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
         },
         "codexTerminalRecorder.diagnosticsLoggingEnabled": {
-          "order": 12,
+          "order": 11,
           "type": "boolean",
           "default": false,
           "description": "Enable diagnostic logging for extension internals."
         },
         "codexTerminalRecorder.diagnosticsLogFileEnabled": {
-          "order": 13,
+          "order": 12,
           "type": "boolean",
           "default": false,
           "markdownDescription": "Write diagnostics into a local log file when diagnostics logging is enabled. [Open diagnostics log](command:codexTerminalRecorder.openDiagnosticsLog)"

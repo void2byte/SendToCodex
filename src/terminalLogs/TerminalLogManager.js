@@ -2,9 +2,17 @@
 
 const vscode = require('vscode');
 const { loadConfiguration, PROPOSED_API_HINT } = require('../config');
-const { ensureDirectory } = require('../files/fileSystem');
+const {
+  ensureDirectory,
+  readTextFileIfExists,
+  writeTextFile
+} = require('../files/fileSystem');
 const { TerminalLogCleaner } = require('./TerminalLogCleaner');
-const { buildTerminalLogPaths, resolveLogDirectory } = require('./logPaths');
+const {
+  buildSelectionSnapshotPath,
+  buildTerminalLogPaths,
+  resolveLogDirectory
+} = require('./logPaths');
 const { TerminalCommandSnapshotter } = require('./TerminalCommandSnapshotter');
 const { TerminalLogSink } = require('./TerminalLogSink');
 const {
@@ -125,18 +133,26 @@ class TerminalLogManager {
 
     for (const [terminal, state] of this.terminalStates) {
       state.selectionAttachmentPaths = state.selectionAttachmentPaths || new Set();
+      state.selectionSnapshotPaths = state.selectionSnapshotPaths || new Set();
       state.nextSelectionAttachmentNumber = Math.max(
         1,
         Number(state.nextSelectionAttachmentNumber) || 1
       );
+      state.nextSelectionSnapshotNumber = Math.max(
+        1,
+        Number(state.nextSelectionSnapshotNumber) || 1
+      );
       const nextPaths = buildTerminalLogPaths(this.logDirectory, state.number, terminal.name);
       const selectionPrefixChanged =
         !state.paths ||
-        state.paths.selectionFilePrefix !== nextPaths.selectionFilePrefix;
+        state.paths.selectionFilePrefix !== nextPaths.selectionFilePrefix ||
+        state.paths.snapshotFilePrefix !== nextPaths.snapshotFilePrefix;
       await state.sink.rebind(nextPaths, this.configuration.maxBytes);
       state.paths = nextPaths;
       if (selectionPrefixChanged) {
         state.selectionAttachmentPaths.clear();
+        state.selectionSnapshotPaths.clear();
+        state.lastSelectionSnapshotPath = '';
       }
 
       for (const filePath of nextPaths.allFilePaths) {
@@ -144,6 +160,10 @@ class TerminalLogManager {
       }
 
       for (const filePath of state.selectionAttachmentPaths) {
+        activeFilePaths.add(filePath);
+      }
+
+      for (const filePath of state.selectionSnapshotPaths) {
         activeFilePaths.add(filePath);
       }
     }
@@ -220,9 +240,11 @@ class TerminalLogManager {
     this.emitCapturedTerminalCountChanged();
     await state.sink.dispose();
     const selectionAttachmentPaths = state.selectionAttachmentPaths || new Set();
+    const selectionSnapshotPaths = state.selectionSnapshotPaths || new Set();
     await this.cleaner.deleteTerminalFiles([
       ...state.paths.allFilePaths,
-      ...selectionAttachmentPaths
+      ...selectionAttachmentPaths,
+      ...selectionSnapshotPaths
     ]);
   }
 
@@ -262,7 +284,10 @@ class TerminalLogManager {
       sink,
       captureMode: 'unknown',
       nextSelectionAttachmentNumber: 1,
+      nextSelectionSnapshotNumber: 1,
       selectionAttachmentPaths: new Set(),
+      selectionSnapshotPaths: new Set(),
+      lastSelectionSnapshotPath: '',
       captureHealth: createCaptureHealth({
         terminalWriteApiAvailable: this.isTerminalWriteApiAvailable(),
         shellExecutionApiAvailable: this.isShellExecutionApiAvailable(),
@@ -382,26 +407,84 @@ class TerminalLogManager {
     const hadCapturedData = hasCapturedData(state.captureHealth);
     const result = await this.commandSnapshotter.captureLastCommandSnapshot(terminal, state);
 
-    if (result.captured && result.text) {
-      markCapturedChunk(state.captureHealth, 'commandSnapshot', result.text);
-      if (!hadCapturedData && hasCapturedData(state.captureHealth)) {
-        this.emitCapturedTerminalCountChanged();
-      }
-      this.logger &&
-        this.logger.info('Captured terminal output via terminal snapshot.', {
-          terminalName: terminal.name,
-          baseName: state.paths.baseName,
-          appendedLength: result.text.length,
-          mode: result.mode
-        });
-    }
+    this.recordSnapshotCaptureResult(terminal, state, result, hadCapturedData);
 
     return result;
+  }
+
+  async captureSelectionSnapshot(terminal, options = {}) {
+    const state = await this.ensureState(terminal);
+    const useCurrentBufferOnly = Boolean(options.useCurrentBufferOnly);
+    let snapshotResult = null;
+
+    if (!useCurrentBufferOnly) {
+      const hadCapturedData = hasCapturedData(state.captureHealth);
+      snapshotResult = await this.commandSnapshotter.captureLastCommandSnapshot(terminal, state);
+      this.recordSnapshotCaptureResult(terminal, state, snapshotResult, hadCapturedData);
+    }
+
+    const snapshotText = normalizeSnapshotText(
+      (snapshotResult && snapshotResult.text) ||
+        state.sink.textBuffer ||
+        (await readTextFileIfExists(state.paths.textLogPath))
+    );
+    const previousSnapshotPath = state.lastSelectionSnapshotPath || '';
+
+    if (previousSnapshotPath) {
+      const previousSnapshotText = await readTextFileIfExists(previousSnapshotPath);
+      if (previousSnapshotText === snapshotText) {
+        return {
+          captured: Boolean(snapshotResult && snapshotResult.captured),
+          filePath: previousSnapshotPath,
+          reusedExistingSnapshot: true,
+          text: snapshotText
+        };
+      }
+    }
+
+    const snapshotPath = buildSelectionSnapshotPath(
+      state.paths,
+      state.nextSelectionSnapshotNumber,
+      'txt'
+    );
+    state.nextSelectionSnapshotNumber += 1;
+    state.selectionSnapshotPaths.add(snapshotPath);
+    state.lastSelectionSnapshotPath = snapshotPath;
+    await writeTextFile(snapshotPath, snapshotText);
+
+    return {
+      captured: Boolean(snapshotResult && snapshotResult.captured),
+      filePath: snapshotPath,
+      reusedExistingSnapshot: false,
+      text: snapshotText
+    };
+  }
+
+  recordSnapshotCaptureResult(terminal, state, result, hadCapturedData) {
+    if (!result || !result.captured || !result.text) {
+      return;
+    }
+
+    markCapturedChunk(state.captureHealth, 'commandSnapshot', result.text);
+    if (!hadCapturedData && hasCapturedData(state.captureHealth)) {
+      this.emitCapturedTerminalCountChanged();
+    }
+    this.logger &&
+      this.logger.info('Captured terminal output via terminal snapshot.', {
+        terminalName: terminal.name,
+        baseName: state.paths.baseName,
+        appendedLength: result.text.length,
+        mode: result.mode
+      });
   }
 }
 
 function formatStateCaptureSummary(state) {
   return `${describeCaptureHealth(state.captureHealth)} Log file: ${state.paths.textLogPath}`;
+}
+
+function normalizeSnapshotText(value) {
+  return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
 module.exports = {

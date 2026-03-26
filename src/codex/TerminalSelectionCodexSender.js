@@ -1,7 +1,7 @@
 'use strict';
 const vscode = require('vscode');
 const { TERMINAL_CONTEXT_SEND_MODES } = require('../config');
-const { readTextFileIfExists, writeTextFile } = require('../files/fileSystem');
+const { writeTextFile } = require('../files/fileSystem');
 const { formatCaptureHealthForEmptyLog } = require('../terminalLogs/captureHealth');
 const { getRecentTerminalSelectionText } = require('../terminalSelection/selectionSources');
 const { buildSelectionAttachmentPath } = require('../terminalLogs/logPaths');
@@ -175,6 +175,9 @@ class TerminalSelectionCodexSender {
     }
 
     const snapshotResult = await terminalLogManager.captureLastCommandSnapshot(resolution.terminal);
+    resolution.canReuseCurrentBufferForSelectionSnapshot = Boolean(
+      snapshotResult && snapshotResult.reason !== 'snapshot-error'
+    );
     if (!snapshotResult || !snapshotResult.captured) {
       return null;
     }
@@ -193,6 +196,7 @@ class TerminalSelectionCodexSender {
 
   async createSelectionFallbackAttachment(resolution, result, reason) {
     const selectionText = getSelectionText(resolution, result);
+    const selectionSnapshot = await this.ensureSelectionSnapshot(resolution);
 
     if (!selectionText.trim()) {
       return null;
@@ -202,7 +206,7 @@ class TerminalSelectionCodexSender {
     await writeTextFile(
       fallbackPath,
       buildFallbackAttachmentText({
-        filePath: resolution.terminalState.paths.textLogPath,
+        snapshotPath: selectionSnapshot.filePath,
         terminalName: resolution.terminal.name,
         strategyLabel: resolution.strategy.strategyDefinition.label,
         reason,
@@ -234,17 +238,17 @@ class TerminalSelectionCodexSender {
   }
 
   async createResolvedSelectionAttachment(resolution, result, contextLines) {
+    const selectionSnapshot = await this.ensureSelectionSnapshot(resolution);
     const attachmentPath = this.allocateSelectionAttachmentPath(resolution);
-    const sourceText = await readTextFileIfExists(result.filePath);
     await writeTextFile(
       attachmentPath,
       buildResolvedAttachmentText({
         contextLines,
-        filePath: result.filePath,
         query: result.query,
         range: result.range,
         selectionText: normalizeSelectionText(getSelectionText(resolution, result)),
-        sourceText,
+        snapshotPath: selectionSnapshot.filePath,
+        sourceText: selectionSnapshot.text,
         strategyLabel: resolution.strategy.strategyDefinition.label,
         summary: result.summary,
         terminalName: resolution.terminal.name
@@ -267,16 +271,7 @@ class TerminalSelectionCodexSender {
   }
 
   async sendResolvedSelectionViaContextBundle(resolution, result, contextLines) {
-    const contextUri = await this.createResolvedSelectionAttachment(
-      resolution,
-      result,
-      contextLines
-    );
-    return this.attachContextBundle(
-      contextUri,
-      vscode.Uri.file(result.filePath),
-      resolution.configuration.attachSnapshotFileInContextBundle
-    );
+    return this.sendResolvedSelectionViaAttachment(resolution, result, contextLines);
   }
 
   async sendFallbackViaContextBundle(resolution, result, reason) {
@@ -285,11 +280,12 @@ class TerminalSelectionCodexSender {
       return null;
     }
 
-    return this.attachContextBundle(
-      fallbackUri,
-      vscode.Uri.file(resolution.terminalState.paths.textLogPath),
-      resolution.configuration.attachSnapshotFileInContextBundle
-    );
+    const command = await this.codexCommandClient.attachFileOrFolder(fallbackUri);
+    return {
+      command,
+      filePath: fallbackUri.fsPath,
+      filePaths: [fallbackUri.fsPath]
+    };
   }
 
   async sendResolvedSelectionViaEditorSelection(resolution, result, contextLines) {
@@ -358,22 +354,6 @@ class TerminalSelectionCodexSender {
     }
   }
 
-  async attachContextBundle(primaryUri, sourceSnapshotUri, attachSnapshotFile = true) {
-    const command = await this.codexCommandClient.attachFileOrFolder(primaryUri);
-    const filePaths = [primaryUri.fsPath];
-
-    if (attachSnapshotFile && (await shouldAttachSourceSnapshot(primaryUri, sourceSnapshotUri))) {
-      await this.codexCommandClient.attachFileOrFolder(sourceSnapshotUri);
-      filePaths.push(sourceSnapshotUri.fsPath);
-    }
-
-    return {
-      command,
-      filePath: primaryUri.fsPath,
-      filePaths
-    };
-  }
-
   allocateSelectionAttachmentPath(resolution) {
     const terminalState = resolution && resolution.terminalState;
     if (!terminalState || !terminalState.paths) {
@@ -389,6 +369,30 @@ class TerminalSelectionCodexSender {
     terminalState.selectionAttachmentPaths = terminalState.selectionAttachmentPaths || new Set();
     terminalState.selectionAttachmentPaths.add(filePath);
     return filePath;
+  }
+
+  async ensureSelectionSnapshot(resolution) {
+    if (resolution && resolution.selectionSnapshot) {
+      return resolution.selectionSnapshot;
+    }
+
+    const terminalLogManager =
+      this.selectionResolver && this.selectionResolver.terminalLogManager;
+    if (!terminalLogManager || !resolution || !resolution.terminal) {
+      return {
+        filePath: '',
+        text: ''
+      };
+    }
+
+    const selectionSnapshot = await terminalLogManager.captureSelectionSnapshot(
+      resolution.terminal,
+      {
+        useCurrentBufferOnly: Boolean(resolution.canReuseCurrentBufferForSelectionSnapshot)
+      }
+    );
+    resolution.selectionSnapshot = selectionSnapshot;
+    return selectionSnapshot;
   }
 }
 
@@ -427,7 +431,7 @@ function buildResolvedAttachmentText(options) {
   const lines = [
     '# Terminal Context',
     '',
-    `Snapshot: ${options.filePath || 'Unavailable'}`,
+    `Snapshot: ${options.snapshotPath || 'Unavailable'}`,
     `Range: ${formatRange(options.range)}`,
     `Command: ${bundleContext.relatedCommand ? `line ${bundleContext.relatedCommand.lineNumber}` : 'Unavailable'}`,
     '',
@@ -457,7 +461,7 @@ function buildFallbackAttachmentText(options) {
   const lines = [
     '# Terminal Context',
     '',
-    `Snapshot: ${options.filePath || 'Unavailable'}`,
+    `Snapshot: ${options.snapshotPath || 'Unavailable'}`,
     `Reason: ${options.reason}`,
     '',
     '## Selected Text',
@@ -725,15 +729,6 @@ function extractCommandLine(lineText) {
   }
 
   return '';
-}
-
-async function shouldAttachSourceSnapshot(primaryUri, sourceSnapshotUri) {
-  if (!primaryUri || !sourceSnapshotUri || primaryUri.fsPath === sourceSnapshotUri.fsPath) {
-    return false;
-  }
-
-  const sourceContents = await readTextFileIfExists(sourceSnapshotUri.fsPath);
-  return Boolean(sourceContents.trim());
 }
 
 module.exports = {

@@ -1,4 +1,3 @@
 node_modules
-.codex-terminal-logs/terminal-001-bash.lines.json
-.codex-terminal-logs/terminal-001-bash.txt
+.codex-terminal-logs/
 .npm-cache/

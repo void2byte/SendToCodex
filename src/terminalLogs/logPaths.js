@@ -24,6 +24,7 @@ function buildTerminalLogPaths(logDirectory, number, terminalName) {
   const textLogPath = path.join(logDirectory, `${baseName}.txt`);
   const lineIndexPath = path.join(logDirectory, `${baseName}.lines.json`);
   const selectionFilePrefix = path.join(logDirectory, `${baseName}.selection-`);
+  const snapshotFilePrefix = path.join(logDirectory, `${baseName}.snapshot-`);
 
   return {
     baseName,
@@ -31,6 +32,7 @@ function buildTerminalLogPaths(logDirectory, number, terminalName) {
     textLogPath,
     lineIndexPath,
     selectionFilePrefix,
+    snapshotFilePrefix,
     allFilePaths: [
       textLogPath,
       lineIndexPath
@@ -42,6 +44,12 @@ function buildSelectionAttachmentPath(paths, sequenceNumber, extension = 'md') {
   const safeExtension = String(extension || 'md').replace(/^\./, '') || 'md';
   const paddedNumber = String(Math.max(1, Number(sequenceNumber) || 1)).padStart(3, '0');
   return `${paths.selectionFilePrefix}${paddedNumber}.${safeExtension}`;
+}
+
+function buildSelectionSnapshotPath(paths, sequenceNumber, extension = 'txt') {
+  const safeExtension = String(extension || 'txt').replace(/^\./, '') || 'txt';
+  const paddedNumber = String(Math.max(1, Number(sequenceNumber) || 1)).padStart(3, '0');
+  return `${paths.snapshotFilePrefix}${paddedNumber}.${safeExtension}`;
 }
 
 function sanitizeFileName(value) {
@@ -57,6 +65,7 @@ function sanitizeFileName(value) {
 
 module.exports = {
   buildSelectionAttachmentPath,
+  buildSelectionSnapshotPath,
   resolveLogDirectory,
   buildTerminalLogPaths
 };

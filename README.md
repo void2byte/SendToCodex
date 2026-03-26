@@ -22,7 +22,7 @@ Local VS Code extension that keeps a rolling plain-text record for each integrat
 Use the `Send to Codex: Locate Active Terminal Selection` command to test the currently selected strategy.
 Use `Send to Codex` to send the resolved terminal context to Codex.
 Use `codexTerminalRecorder.terminalContextSendMode` to choose between a structured Markdown context bundle, a separate attachment file, and the legacy editor-selection flow.
-Use `codexTerminalRecorder.attachSnapshotFileInContextBundle` to control whether `contextBundle` also attaches the full terminal snapshot `.txt` file.
+Leave `codexTerminalRecorder.logDirectory` empty to store terminal recordings in the extension storage directory outside the workspace.
 On Windows, the extension can surface a compact native popup action near the cursor for editor and terminal selections, with a close action on the right edge.
 The `Ctrl+Shift+L` shortcut remains available for both editor and terminal selections.
 The optional status bar buttons are kept as a disabled-by-default fallback and can be enabled in settings.
@@ -55,7 +55,6 @@ code-insiders --enable-proposed-api=local.codex-terminal-recorder
 - `codexTerminalRecorder.selectionTrackingStrategy`
 - `codexTerminalRecorder.selectionContextLines`
 - `codexTerminalRecorder.terminalContextSendMode`
-- `codexTerminalRecorder.attachSnapshotFileInContextBundle`
 - `codexTerminalRecorder.showNativeTerminalSelectionPopup`
 - `codexTerminalRecorder.showNativeEditorSelectionPopup`
 - `codexTerminalRecorder.showCodexSelectionButton`

@@ -53,12 +53,11 @@ function loadConfiguration() {
 
   return {
     enabled: config.get('enabled', true),
-    logDirectory: String(config.get('logDirectory', '.codex-terminal-logs')).trim(),
+    logDirectory: normalizeLogDirectory(config.get('logDirectory', '')),
     maxBytes: Math.max(1, Math.round(maxFileSizeMb * 1024 * 1024)),
     selectionTrackingStrategy,
     selectionContextLines,
     terminalContextSendMode,
-    attachSnapshotFileInContextBundle: config.get('attachSnapshotFileInContextBundle', true),
     diagnosticsLoggingEnabled: config.get(
       'diagnosticsLoggingEnabled',
       DIAGNOSTICS_LOGGING_ENABLED_DEFAULT
@@ -72,6 +71,23 @@ function loadConfiguration() {
     showCodexSelectionButton: config.get('showCodexSelectionButton', false),
     showCodexEditorSelectionButton: config.get('showCodexEditorSelectionButton', false)
   };
+}
+
+function normalizeLogDirectory(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const normalizedSlashes = normalized.replace(/\\/g, '/').replace(/\/+$/g, '');
+  if (
+    normalizedSlashes === '.codex-terminal-logs' ||
+    normalizedSlashes === './.codex-terminal-logs'
+  ) {
+    return '';
+  }
+
+  return normalized;
 }
 
 module.exports = {
