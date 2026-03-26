@@ -1,6 +1,6 @@
 'use strict';
 
-const koffi = require('koffi');
+const koffi = require('./vendor/koffi');
 
 const ACTION_BUTTON_ID = 1001;
 const CLOSE_BUTTON_ID = 1002;
@@ -24,7 +24,13 @@ const WM_ACTIVATE = 0x0006;
 const WM_CLOSE = 0x0010;
 const WM_COMMAND = 0x0111;
 const WM_DESTROY = 0x0002;
+const WM_TIMER = 0x0113;
 const WA_INACTIVE = 0;
+const VK_LBUTTON = 0x01;
+const VK_RBUTTON = 0x02;
+const VK_MBUTTON = 0x04;
+const CLICK_POLL_TIMER_ID = 1;
+const CLICK_POLL_INTERVAL_MS = 40;
 
 const HANDLE = koffi.pointer('HANDLE', koffi.opaque());
 const HWND = koffi.alias('HWND', HANDLE);
@@ -34,6 +40,12 @@ const HINSTANCE = HANDLE;
 const POINT = koffi.struct('POINT', {
   x: 'long',
   y: 'long'
+});
+const RECT = koffi.struct('RECT', {
+  left: 'long',
+  top: 'long',
+  right: 'long',
+  bottom: 'long'
 });
 const MSG = koffi.struct('MSG', {
   hwnd: HWND,
@@ -75,7 +87,10 @@ const DefWindowProcW =
   );
 const DestroyWindow = user32 && user32.func('bool __stdcall DestroyWindow(HWND hWnd)');
 const DispatchMessageW = user32 && user32.func('intptr_t __stdcall DispatchMessageW(const MSG *lpMsg)');
+const GetAsyncKeyState = user32 && user32.func('int16_t __stdcall GetAsyncKeyState(int vKey)');
 const GetCursorPos = user32 && user32.func('bool __stdcall GetCursorPos(_Out_ POINT *pos)');
+const GetWindowRect =
+  user32 && user32.func('bool __stdcall GetWindowRect(HWND hWnd, _Out_ RECT *lpRect)');
 const GetMessageW =
   user32 &&
   user32.func(
@@ -83,9 +98,15 @@ const GetMessageW =
   );
 const GetSysColorBrush =
   user32 && user32.func('HBRUSH __stdcall GetSysColorBrush(int nIndex)');
+const KillTimer = user32 && user32.func('bool __stdcall KillTimer(HWND hWnd, uintptr_t uIDEvent)');
 const PostQuitMessage = user32 && user32.func('void __stdcall PostQuitMessage(int nExitCode)');
 const RegisterClassW =
   user32 && user32.func('uint16_t __stdcall RegisterClassW(const WNDCLASSW *lpWndClass)');
+const SetTimer =
+  user32 &&
+  user32.func(
+    'uintptr_t __stdcall SetTimer(HWND hWnd, uintptr_t nIDEvent, uint32_t uElapse, void *lpTimerFunc)'
+  );
 const ShowWindow = user32 && user32.func('bool __stdcall ShowWindow(HWND hWnd, int nCmdShow)');
 const TranslateMessage = user32 && user32.func('bool __stdcall TranslateMessage(const MSG *lpMsg)');
 const UnregisterClassW =
@@ -128,6 +149,7 @@ function showPopupAction(payload) {
   const className = 'CodexTerminalRecorderPopupButton';
   const popupState = {
     closing: false,
+    mousePressed: false,
     result: { action: 'dismiss' },
     windowHandle: null
   };
@@ -155,6 +177,12 @@ function showPopupAction(payload) {
       case WM_CLOSE:
         closePopup(popupState, 'dismiss');
         return 0;
+      case WM_TIMER:
+        if (Number(wParam) === CLICK_POLL_TIMER_ID) {
+          pollForOutsideClick(popupState);
+          return 0;
+        }
+        break;
       case WM_DESTROY:
         popupState.windowHandle = null;
         if (PostQuitMessage) {
@@ -263,6 +291,20 @@ function showPopupAction(payload) {
       };
     }
 
+    popupState.mousePressed = isAnyMouseButtonPressed();
+
+    const timerHandle = SetTimer
+      ? SetTimer(windowHandle, CLICK_POLL_TIMER_ID, CLICK_POLL_INTERVAL_MS, null)
+      : 0;
+
+    if (!timerHandle) {
+      closePopup(popupState, 'dismiss');
+      return {
+        action: 'error',
+        message: `SetTimer failed with error ${readLastError()}.`
+      };
+    }
+
     if (ShowWindow) {
       // Keep focus in VS Code so the popup does not interrupt typing/editing.
       ShowWindow(windowHandle, SW_SHOWNOACTIVATE);
@@ -294,6 +336,10 @@ function showPopupAction(payload) {
       message: error && error.message ? error.message : String(error)
     };
   } finally {
+    if (popupState.windowHandle && KillTimer) {
+      KillTimer(popupState.windowHandle, CLICK_POLL_TIMER_ID);
+    }
+
     if (popupState.windowHandle && DestroyWindow) {
       DestroyWindow(popupState.windowHandle);
     }
@@ -321,6 +367,54 @@ function closePopup(popupState, action) {
 
   popupState.closing = true;
   DestroyWindow(popupState.windowHandle);
+}
+
+function pollForOutsideClick(popupState) {
+  const mousePressed = isAnyMouseButtonPressed();
+  const clickStartedOutside =
+    mousePressed && !popupState.mousePressed && !isCursorInsideWindow(popupState.windowHandle);
+
+  popupState.mousePressed = mousePressed;
+
+  if (clickStartedOutside) {
+    closePopup(popupState, 'dismiss');
+  }
+}
+
+function isCursorInsideWindow(windowHandle) {
+  if (!windowHandle || !GetCursorPos || !GetWindowRect) {
+    return false;
+  }
+
+  const cursor = {};
+  const rect = {};
+
+  if (!GetCursorPos(cursor) || !GetWindowRect(windowHandle, rect)) {
+    return false;
+  }
+
+  return (
+    cursor.x >= rect.left &&
+    cursor.x < rect.right &&
+    cursor.y >= rect.top &&
+    cursor.y < rect.bottom
+  );
+}
+
+function isAnyMouseButtonPressed() {
+  return (
+    isMouseButtonPressed(VK_LBUTTON) ||
+    isMouseButtonPressed(VK_RBUTTON) ||
+    isMouseButtonPressed(VK_MBUTTON)
+  );
+}
+
+function isMouseButtonPressed(virtualKey) {
+  if (!GetAsyncKeyState) {
+    return false;
+  }
+
+  return (Number(GetAsyncKeyState(virtualKey)) & 0x8000) !== 0;
 }
 
 function waitForPayload() {

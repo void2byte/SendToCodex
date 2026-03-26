@@ -4,8 +4,8 @@ const vscode = require('vscode');
 
 const CONFIG_SECTION = 'codexTerminalRecorder';
 const OUTPUT_CHANNEL_NAME = 'Send to Codex';
-const PROPOSED_API_HINT =
-  'Terminal capture requires VS Code Insiders (or extension development mode) with --enable-proposed-api=local.codex-terminal-recorder.';
+const TERMINAL_CAPTURE_API_HINT =
+  'Terminal capture APIs are unavailable in this VS Code build. Update VS Code to a recent stable version.';
 const DIAGNOSTICS_LOGGING_ENABLED_DEFAULT = false;
 const DIAGNOSTICS_LOG_FILE_ENABLED_DEFAULT = false;
 const TERMINAL_CONTEXT_SEND_MODES = {
@@ -95,7 +95,7 @@ module.exports = {
   DIAGNOSTICS_LOG_FILE_ENABLED_DEFAULT,
   DIAGNOSTICS_LOGGING_ENABLED_DEFAULT,
   OUTPUT_CHANNEL_NAME,
-  PROPOSED_API_HINT,
+  TERMINAL_CAPTURE_API_HINT,
   SELECTION_TRACKING_STRATEGIES,
   TERMINAL_CONTEXT_SEND_MODES,
   loadConfiguration

@@ -83,23 +83,6 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 
 ## Requirements and limitations
 
-This extension currently depends on proposed VS Code terminal APIs:
+The extension expects a recent stable VS Code build and the OpenAI VS Code extension so the Codex attach commands are available.
 
-- `terminalDataWriteEvent`
-- `terminalExecuteCommandEvent`
-- `terminalSelection`
-
-That means:
-
-1. You need VS Code Insiders or extension development mode.
-2. You must enable the proposed API for this extension:
-
-```powershell
-code-insiders --enable-proposed-api=local.codex-terminal-recorder
-```
-
-The extension also expects the OpenAI VS Code extension to be installed and enabled so the Codex attach commands are available.
-
-Existing terminal scrollback is not backfilled. Capture starts after the extension begins tracking a terminal and new output is produced. If the raw data stream is unavailable, the extension falls back to shell integration command capture. If that still does not provide enough data, opening the active terminal log or sending terminal context can trigger an on-demand snapshot of the visible terminal buffer.
-
-Because the extension relies on proposed APIs, it is suitable for local use, development, and VSIX sharing, but not for VS Code Marketplace publication in its current form.
+Existing terminal scrollback is not backfilled. Capture starts after the extension begins tracking a terminal and new output is produced. If the raw data stream is unavailable in a particular VS Code build, the extension falls back to shell integration command capture. If that still does not provide enough data, opening the active terminal log or sending terminal context can trigger an on-demand snapshot of the visible terminal buffer.

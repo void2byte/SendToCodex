@@ -1,6 +1,0 @@
-.git/**
-.codex-terminal-logs/**
-.npm-cache/**
-.vscode/**
-*.vsix
-package-lock.json

@@ -13,6 +13,7 @@ const EDITOR_SOURCE = 'editor';
 const TERMINAL_SOURCE = 'terminal';
 const POPUP_DEBOUNCE_MS = 260;
 const TERMINAL_POLL_INTERVAL_MS = 250;
+const WINDOW_BLUR_DISMISS_DELAY_MS = 180;
 
 class NativeSelectionOverlayController {
   constructor(popupPresenter, suppression, logger, codexAvailabilityController) {
@@ -28,12 +29,16 @@ class NativeSelectionOverlayController {
     this.popupInFlight = false;
     this.activePopupSource = undefined;
     this.terminalIntervalHandle = undefined;
+    this.windowBlurTimer = undefined;
     this.terminalIds = new WeakMap();
     this.nextTerminalId = 1;
   }
 
   activate() {
     this.disposables.push(
+      vscode.window.onDidChangeWindowState((state) => {
+        this.handleWindowStateChange(state);
+      }),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         this.syncEditorSelection(editor);
       }),
@@ -64,6 +69,8 @@ class NativeSelectionOverlayController {
       clearInterval(this.terminalIntervalHandle);
       this.terminalIntervalHandle = undefined;
     }
+
+    this.clearWindowBlurTimer();
 
     for (const timer of this.scheduledTimers.values()) {
       clearTimeout(timer);
@@ -165,6 +172,11 @@ class NativeSelectionOverlayController {
   }
 
   async maybeShowDescriptor(descriptor) {
+    if (!isWindowFocused()) {
+      this.clearSource(descriptor.source, 'window-not-focused');
+      return;
+    }
+
     if (this.currentSelectionKeys.get(descriptor.source) !== descriptor.key) {
       return;
     }
@@ -230,6 +242,22 @@ class NativeSelectionOverlayController {
     }
   }
 
+  handleWindowStateChange(state) {
+    if (state && state.focused) {
+      this.clearWindowBlurTimer();
+      this.syncEditorSelection(vscode.window.activeTextEditor);
+      this.pollTerminalSelection();
+      return;
+    }
+
+    if (this.popupInFlight) {
+      this.scheduleWindowBlurDismiss();
+      return;
+    }
+
+    this.clearAllSources('window-blurred');
+  }
+
   async flushPendingDescriptors() {
     if (this.popupInFlight) {
       return;
@@ -269,6 +297,31 @@ class NativeSelectionOverlayController {
         source,
         reason
       });
+  }
+
+  clearAllSources(reason) {
+    this.clearSource(EDITOR_SOURCE, reason);
+    this.clearSource(TERMINAL_SOURCE, reason);
+  }
+
+  scheduleWindowBlurDismiss() {
+    this.clearWindowBlurTimer();
+    this.windowBlurTimer = setTimeout(() => {
+      this.windowBlurTimer = undefined;
+
+      if (!isWindowFocused() && this.popupInFlight) {
+        this.clearAllSources('window-blurred');
+      }
+    }, WINDOW_BLUR_DISMISS_DELAY_MS);
+  }
+
+  clearWindowBlurTimer() {
+    if (!this.windowBlurTimer) {
+      return;
+    }
+
+    clearTimeout(this.windowBlurTimer);
+    this.windowBlurTimer = undefined;
   }
 
   clearScheduledTimer(source) {
@@ -362,6 +415,10 @@ function isUserInitiatedEditorSelection(kind) {
     kind === vscode.TextEditorSelectionChangeKind.Mouse ||
     kind === vscode.TextEditorSelectionChangeKind.Keyboard
   );
+}
+
+function isWindowFocused() {
+  return !vscode.window.state || vscode.window.state.focused !== false;
 }
 
 function isGeneratedSelectionFallbackFile(filePath) {

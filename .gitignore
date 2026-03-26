@@ -1,3 +1,4 @@
 node_modules
 .codex-terminal-logs/
 .npm-cache/
+*.vsix

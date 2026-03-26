@@ -3,7 +3,7 @@
   "displayName": "Send to Codex",
   "description": "Keeps a rolling per-terminal text recording with the latest integrated terminal output.",
   "version": "0.0.1",
-  "publisher": "local",
+  "publisher": "screph",
   "license": "UNLICENSED",
   "icon": "media/icon.png",
   "engines": {
@@ -13,6 +13,16 @@
     "Other"
   ],
   "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "package.json",
+    "README.md",
+    "media/**",
+    "src/**"
+  ],
+  "scripts": {
+    "package:vsix": "npx --cache .npm-cache @vscode/vsce package --allow-missing-repository --no-dependencies"
+  },
   "activationEvents": [
     "onStartupFinished",
     "onCommand:codexTerminalRecorder.openLogDirectory",
@@ -26,11 +36,6 @@
     "onCommand:codexTerminalRecorder.locateActiveTerminalSelection",
     "onCommand:codexTerminalRecorder.sendActiveEditorSelectionToCodexChat",
     "onCommand:codexTerminalRecorder.sendActiveTerminalSelectionToCodexChat"
-  ],
-  "enabledApiProposals": [
-    "terminalDataWriteEvent",
-    "terminalExecuteCommandEvent",
-    "terminalSelection"
   ],
   "contributes": {
     "commands": [

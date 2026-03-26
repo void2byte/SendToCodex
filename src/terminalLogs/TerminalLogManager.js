@@ -1,7 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
-const { loadConfiguration, PROPOSED_API_HINT } = require('../config');
+const { loadConfiguration, TERMINAL_CAPTURE_API_HINT } = require('../config');
 const {
   ensureDirectory,
   readTextFileIfExists,
@@ -76,10 +76,10 @@ class TerminalLogManager {
     if (!terminalWriteApiAvailable) {
       this.logger &&
         this.logger.warn('Terminal write API is unavailable.', {
-          proposedApiEnabled: false
+          terminalWriteApiAvailable: false
         });
-      this.output.appendLine(PROPOSED_API_HINT);
-      void vscode.window.showWarningMessage(PROPOSED_API_HINT);
+      this.output.appendLine(TERMINAL_CAPTURE_API_HINT);
+      void vscode.window.showWarningMessage(TERMINAL_CAPTURE_API_HINT);
     } else {
       this.runtimeDisposables.push(
         vscode.window.onDidWriteTerminalData((event) => {
