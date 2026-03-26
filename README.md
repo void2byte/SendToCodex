@@ -1,4 +1,4 @@
-<img width="1235" height="988" alt="image" src="https://github.com/user-attachments/assets/9411f356-04e6-43f0-a9ce-e47cfe364606" />
+
 # Send to Codex
 
 Local VS Code extension that keeps a rolling plain-text record for each integrated terminal.
