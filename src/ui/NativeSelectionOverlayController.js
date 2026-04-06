@@ -402,11 +402,17 @@ function hashText(value) {
 }
 
 function isNativeEditorPopupEnabled() {
-  return Boolean(loadConfiguration().showNativeEditorSelectionPopup && process.platform === 'win32');
+  return Boolean(
+    loadConfiguration().showNativeEditorSelectionPopup &&
+      (process.platform === 'win32' || process.platform === 'darwin')
+  );
 }
 
 function isNativeTerminalPopupEnabled() {
-  return Boolean(loadConfiguration().showNativeTerminalSelectionPopup && process.platform === 'win32');
+  return Boolean(
+    loadConfiguration().showNativeTerminalSelectionPopup &&
+      (process.platform === 'win32' || process.platform === 'darwin')
+  );
 }
 
 function isUserInitiatedEditorSelection(kind) {

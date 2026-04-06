@@ -15,7 +15,7 @@ const { CodexCommandClient } = require('./codex/CodexCommandClient');
 const { EditorSelectionCodexSender } = require('./codex/EditorSelectionCodexSender');
 const { ExplorerResourcesCodexSender } = require('./codex/ExplorerResourcesCodexSender');
 const { TerminalSelectionCodexSender } = require('./codex/TerminalSelectionCodexSender');
-const { WindowsSelectionPopupPresenter } = require('./native/windows/WindowsSelectionPopupPresenter');
+const { createSelectionPopupPresenter } = require('./native/presenter');
 const { NativeSelectionOverlayController } = require('./ui/NativeSelectionOverlayController');
 const { EditorSelectionStatusBarController } = require('./ui/EditorSelectionStatusBarController');
 const { RecorderSettingsStatusBarController } = require('./ui/RecorderSettingsStatusBarController');
@@ -57,7 +57,7 @@ function activate(context) {
     popupSuppression
   );
   const nativeSelectionOverlayController = new NativeSelectionOverlayController(
-    new WindowsSelectionPopupPresenter(logger),
+    createSelectionPopupPresenter(logger),
     popupSuppression,
     logger,
     codexAvailabilityController

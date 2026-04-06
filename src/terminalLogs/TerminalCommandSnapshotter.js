@@ -1,7 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
-const { getClipboardSequenceNumber } = require('../native/windows/clipboardSequence');
+const { getClipboardSequenceNumber } = require('../native/clipboard');
 const {
   rememberTerminalSelectionText,
   runWithTerminalSelectionCacheSuppressed
