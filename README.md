@@ -12,7 +12,7 @@ VS Code extension that captures integrated terminal output, resolves terminal se
 - Sends terminal context to Codex as a compact Markdown bundle file.
 - Creates immutable per-selection terminal snapshots and reuses the previous snapshot file when the buffer did not change.
 - Supports editor selections and Explorer file or folder attachments in addition to terminal selections.
-- Shows a native Windows popup near terminal and editor selections, with optional status bar fallback buttons.
+- Shows a **native platform popup** near terminal and editor selections (Windows and macOS supported).
 - Can write a diagnostics log for troubleshooting activation, selection detection, and Codex integration.
 
 ## How terminal sending works
@@ -42,7 +42,7 @@ Use `Send to Codex: Open Log Directory` to open the current recordings folder.
 
 - `terminalSelectionTextSearch`: reads the live terminal selection and finds its last occurrence in the plain-text terminal log.
 - `indexedTerminalSelectionSearch`: reads the live terminal selection and resolves its location using the plain-text log plus the line index sidecar.
-- `clipboardTextSearch`: reads copied terminal text from the clipboard and finds its last occurrence in the plain-text terminal log. Useful when direct terminal selection access is unavailable or unreliable.
+- `clipboardTextSearch`: reads copied terminal text from the clipboard and finds its last occurrence in the plain-text terminal log. Useful when direct terminal selection access is unavailable or unreliable. Supported on both Windows and macOS.
 
 Use `Send to Codex: Locate Active Terminal Selection` to inspect how the current strategy resolves the active selection.
 
@@ -72,8 +72,8 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 - `codexTerminalRecorder.terminalContextSendMode`: choose between `contextBundle`, `attachmentFile`, and `editorSelection`.
 - `codexTerminalRecorder.selectionTrackingStrategy`: choose how terminal selection text is captured and mapped back to the log files.
 - `codexTerminalRecorder.selectionContextLines`: number of surrounding lines to include in the context preview.
-- `codexTerminalRecorder.showNativeTerminalSelectionPopup`: show the native Windows popup for terminal selections.
-- `codexTerminalRecorder.showNativeEditorSelectionPopup`: show the native Windows popup for editor selections.
+- `codexTerminalRecorder.showNativeTerminalSelectionPopup`: show the native popup for terminal selections.
+- `codexTerminalRecorder.showNativeEditorSelectionPopup`: show the native popup for editor selections.
 - `codexTerminalRecorder.showCodexSelectionButton`: show the fallback terminal status bar button.
 - `codexTerminalRecorder.showCodexEditorSelectionButton`: show the fallback editor status bar button.
 - `codexTerminalRecorder.maxFileSizeMb`: rolling size limit per terminal log.
@@ -83,6 +83,9 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 
 ## Requirements and limitations
 
-The extension expects a recent stable VS Code build and the OpenAI VS Code extension so the Codex attach commands are available.
+- **Platform Support**: Fully supports Windows and macOS.
+- **macOS Popups**: Requires the `swift` interpreter to be available (standard on macOS).
+- **VS Code**: Expects a recent stable VS Code build.
+- **OpenAI Extension**: Requires the OpenAI VS Code extension for Codex integration.
 
 Existing terminal scrollback is not backfilled. Capture starts after the extension begins tracking a terminal and new output is produced. If the raw data stream is unavailable in a particular VS Code build, the extension falls back to shell integration command capture. If that still does not provide enough data, opening the active terminal log or sending terminal context can trigger an on-demand snapshot of the visible terminal buffer.

@@ -178,13 +178,13 @@
           "order": 5,
           "type": "boolean",
           "default": true,
-          "description": "Show a native Windows popup action near the cursor when terminal text selection becomes available."
+          "description": "Show a native platform popup action near the cursor when terminal text selection becomes available."
         },
         "codexTerminalRecorder.showNativeEditorSelectionPopup": {
           "order": 6,
           "type": "boolean",
           "default": true,
-          "description": "Show a native Windows popup action near the cursor when editor text selection becomes available."
+          "description": "Show a native platform popup action near the cursor when editor text selection becomes available."
         },
         "codexTerminalRecorder.showCodexSelectionButton": {
           "order": 7,

@@ -156,3 +156,7 @@ build/
 DerivedData/
 *.moved-aside
 *.xcuserstate
+
+# Dependency lock files
+pnpm-lock.yaml
+package-lock.json
