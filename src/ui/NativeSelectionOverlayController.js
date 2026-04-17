@@ -82,7 +82,7 @@ class NativeSelectionOverlayController {
 
   syncEditorSelection(editor) {
     const descriptor = buildEditorDescriptor(editor);
-    if (!isNativeEditorPopupEnabled()) {
+    if (!isNativeEditorPopupEnabled() || !this.isPopupSupported()) {
       this.clearSource(EDITOR_SOURCE, 'editor-popup-disabled');
       return;
     }
@@ -96,7 +96,7 @@ class NativeSelectionOverlayController {
   }
 
   handleEditorSelectionEvent(event) {
-    if (!isNativeEditorPopupEnabled()) {
+    if (!isNativeEditorPopupEnabled() || !this.isPopupSupported()) {
       this.clearSource(EDITOR_SOURCE, 'editor-popup-disabled');
       return;
     }
@@ -124,7 +124,7 @@ class NativeSelectionOverlayController {
       return;
     }
 
-    if (!isNativeTerminalPopupEnabled()) {
+    if (!isNativeTerminalPopupEnabled() || !this.isPopupSupported()) {
       this.clearSource(TERMINAL_SOURCE, 'terminal-popup-disabled');
       return;
     }
@@ -172,6 +172,11 @@ class NativeSelectionOverlayController {
   }
 
   async maybeShowDescriptor(descriptor) {
+    if (!this.isPopupSupported()) {
+      this.clearSource(descriptor.source, 'popup-presenter-unsupported');
+      return;
+    }
+
     if (!isWindowFocused()) {
       this.clearSource(descriptor.source, 'window-not-focused');
       return;
@@ -231,7 +236,7 @@ class NativeSelectionOverlayController {
         this.suppression.suppress(1200, `native-selection-popup-skip-${descriptor.source}`);
       } else if (result.action === 'error') {
         void vscode.window.setStatusBarMessage(
-          'Native selection popup failed. Use Ctrl+Shift+L or enable the status bar fallback button in settings.',
+          `Native selection popup failed. Use ${SEND_TO_CODEX_SHORTCUT_LABEL} or enable the status bar fallback button in settings.`,
           5000
         );
       }
@@ -334,6 +339,12 @@ class NativeSelectionOverlayController {
     this.scheduledTimers.delete(source);
   }
 
+  isPopupSupported() {
+    return !this.popupPresenter || typeof this.popupPresenter.isSupported !== 'function'
+      ? false
+      : this.popupPresenter.isSupported();
+  }
+
   buildTerminalDescriptor() {
     const terminal = vscode.window.activeTerminal;
     const selection = peekTerminalSelectionText(terminal);
@@ -402,11 +413,17 @@ function hashText(value) {
 }
 
 function isNativeEditorPopupEnabled() {
-  return Boolean(loadConfiguration().showNativeEditorSelectionPopup && process.platform === 'win32');
+  return Boolean(
+    loadConfiguration().showNativeEditorSelectionPopup &&
+      (process.platform === 'win32' || process.platform === 'darwin')
+  );
 }
 
 function isNativeTerminalPopupEnabled() {
-  return Boolean(loadConfiguration().showNativeTerminalSelectionPopup && process.platform === 'win32');
+  return Boolean(
+    loadConfiguration().showNativeTerminalSelectionPopup &&
+      (process.platform === 'win32' || process.platform === 'darwin')
+  );
 }
 
 function isUserInitiatedEditorSelection(kind) {

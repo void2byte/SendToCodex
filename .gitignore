@@ -2,3 +2,5 @@ node_modules
 .codex-terminal-logs/
 .npm-cache/
 *.vsix
+.DS_Store
+DerivedData/

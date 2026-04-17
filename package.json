@@ -1,11 +1,19 @@
 {
   "name": "codex-terminal-recorder",
   "displayName": "Send to Codex",
-  "description": "Keeps a rolling per-terminal text recording with the latest integrated terminal output.",
-  "version": "0.0.2",
+  "description": "Capture terminal context and send terminal or editor selections to Codex with native Windows and macOS popups.",
+  "version": "0.0.3",
   "publisher": "screph",
   "license": "UNLICENSED",
   "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/void2byte/SendToCodex.git"
+  },
+  "homepage": "https://github.com/void2byte/SendToCodex",
+  "bugs": {
+    "url": "https://github.com/void2byte/SendToCodex/issues"
+  },
   "engines": {
     "vscode": "^1.105.0"
   },
@@ -178,13 +186,13 @@
           "order": 5,
           "type": "boolean",
           "default": true,
-          "description": "Show a native Windows popup action near the cursor when terminal text selection becomes available."
+          "description": "Show a native platform popup action near the cursor when terminal text selection becomes available."
         },
         "codexTerminalRecorder.showNativeEditorSelectionPopup": {
           "order": 6,
           "type": "boolean",
           "default": true,
-          "description": "Show a native Windows popup action near the cursor when editor text selection becomes available."
+          "description": "Show a native platform popup action near the cursor when editor text selection becomes available."
         },
         "codexTerminalRecorder.showCodexSelectionButton": {
           "order": 7,
@@ -226,8 +234,5 @@
         }
       }
     }
-  },
-  "dependencies": {
-    "koffi": "^2.15.2"
   }
 }
