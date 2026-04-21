@@ -217,7 +217,8 @@ class NativeSelectionOverlayController {
         offsetX: 12,
         offsetY: 18,
         shortcutLabel: SEND_TO_CODEX_SHORTCUT_LABEL,
-        source: descriptor.source
+        source: descriptor.source,
+        themeKind: getActiveThemeKind()
       });
 
       this.logger &&
@@ -413,16 +414,20 @@ function hashText(value) {
 }
 
 function isNativeEditorPopupEnabled() {
+  const configuration = loadConfiguration();
   return Boolean(
-    loadConfiguration().showNativeEditorSelectionPopup &&
-      (process.platform === 'win32' || process.platform === 'darwin')
+    configuration.sendToCodexEnabled &&
+      configuration.showNativeEditorSelectionPopup &&
+      isNativeSelectionPopupPlatform()
   );
 }
 
 function isNativeTerminalPopupEnabled() {
+  const configuration = loadConfiguration();
   return Boolean(
-    loadConfiguration().showNativeTerminalSelectionPopup &&
-      (process.platform === 'win32' || process.platform === 'darwin')
+    configuration.sendToCodexEnabled &&
+      configuration.showNativeTerminalSelectionPopup &&
+      isNativeSelectionPopupPlatform()
   );
 }
 
@@ -441,6 +446,30 @@ function isWindowFocused() {
 function isGeneratedSelectionFallbackFile(filePath) {
   const normalized = String(filePath || '').toLowerCase();
   return /\.selection(?:-[^.]+)?\.(txt|md)$/i.test(normalized);
+}
+
+function isNativeSelectionPopupPlatform() {
+  return (
+    process.platform === 'win32' ||
+    process.platform === 'darwin' ||
+    process.platform === 'linux'
+  );
+}
+
+function getActiveThemeKind() {
+  const kind = vscode.window.activeColorTheme && vscode.window.activeColorTheme.kind;
+
+  switch (kind) {
+    case vscode.ColorThemeKind.Light:
+      return 'light';
+    case vscode.ColorThemeKind.HighContrast:
+      return 'highContrast';
+    case vscode.ColorThemeKind.HighContrastLight:
+      return 'highContrastLight';
+    case vscode.ColorThemeKind.Dark:
+    default:
+      return 'dark';
+  }
 }
 
 module.exports = {

@@ -32,6 +32,12 @@ class TerminalSelectionStatusBarController {
 
   async refresh() {
     const configuration = loadConfiguration();
+    if (!configuration.sendToCodexEnabled) {
+      this.hideWithReason('send-disabled');
+      this.statusBarItem.hide();
+      return;
+    }
+
     if (!this.codexAvailabilityController.isTerminalSelectionSendAvailable()) {
       this.hideWithReason('terminal-send-unavailable');
       this.statusBarItem.hide();

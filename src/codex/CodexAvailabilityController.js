@@ -8,7 +8,11 @@ const CODEX_FILE_ATTACHMENT_AVAILABLE_CONTEXT =
 const TERMINAL_SELECTION_SEND_AVAILABLE_CONTEXT =
   'codexTerminalRecorder.terminalSelectionSendAvailable';
 
-const { loadConfiguration, TERMINAL_CONTEXT_SEND_MODES } = require('../config');
+const {
+  isSendToCodexEnabled,
+  loadConfiguration,
+  TERMINAL_CONTEXT_SEND_MODES
+} = require('../config');
 
 class CodexAvailabilityController {
   constructor(codexCommandClient, logger) {
@@ -51,6 +55,16 @@ class CodexAvailabilityController {
   }
 
   async refresh(forceRefresh = false) {
+    const configuration = loadConfiguration();
+    if (!isSendToCodexEnabled(configuration)) {
+      return this.applyAvailabilityState({
+        available: false,
+        fileAttachmentAvailable: false,
+        selectionCommandAvailable: false,
+        terminalSelectionSendAvailable: false
+      });
+    }
+
     const selectionCommandAvailable = Boolean(
       await this.codexCommandClient.getSelectionAttachmentCommand({ forceRefresh })
     );
@@ -58,7 +72,6 @@ class CodexAvailabilityController {
       await this.codexCommandClient.getFileAttachmentCommand({ forceRefresh })
     );
     const available = selectionCommandAvailable || fileAttachmentAvailable;
-    const configuration = loadConfiguration();
     const terminalSelectionSendAvailable =
       configuration.terminalContextSendMode === TERMINAL_CONTEXT_SEND_MODES.editorSelection
         ? selectionCommandAvailable
@@ -71,6 +84,22 @@ class CodexAvailabilityController {
         terminalSelectionSendAvailable,
         forceRefresh
       });
+    return this.applyAvailabilityState({
+      available,
+      fileAttachmentAvailable,
+      selectionCommandAvailable,
+      terminalSelectionSendAvailable
+    });
+  }
+
+  async applyAvailabilityState(state) {
+    const available = Boolean(state && state.available);
+    const fileAttachmentAvailable = Boolean(state && state.fileAttachmentAvailable);
+    const selectionCommandAvailable = Boolean(state && state.selectionCommandAvailable);
+    const terminalSelectionSendAvailable = Boolean(
+      state && state.terminalSelectionSendAvailable
+    );
+
     if (
       this.initialized &&
       this.available === available &&

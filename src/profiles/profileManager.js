@@ -80,6 +80,27 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function createComparableAuthSnapshot(authData) {
+  if (!authData || typeof authData !== 'object') {
+    return null;
+  }
+
+  return {
+    idToken: asOptionalString(authData.idToken),
+    accessToken: asOptionalString(authData.accessToken),
+    refreshToken: asOptionalString(authData.refreshToken),
+    accountId: asOptionalString(authData.accountId),
+    defaultOrganizationId: asOptionalString(authData.defaultOrganizationId),
+    defaultOrganizationTitle: asOptionalString(authData.defaultOrganizationTitle),
+    chatgptUserId: asOptionalString(authData.chatgptUserId),
+    userId: asOptionalString(authData.userId),
+    subject: asOptionalString(authData.subject),
+    email: asOptionalString(authData.email) || 'Unknown',
+    planType: asOptionalString(authData.planType) || 'Unknown',
+    authJson: cloneJson(authData.authJson)
+  };
+}
+
 function normalizeRateLimitWindowState(value) {
   const state = asObject(value);
   if (!state) {
@@ -793,8 +814,65 @@ class ProfileManager {
     return true;
   }
 
+  async syncStoredProfileAuth(profileId, authData) {
+    if (!profileId || !authData) {
+      return false;
+    }
+
+    const storedAuthData = await this.loadAuthData(profileId);
+    if (
+      serializeComparable(createComparableAuthSnapshot(storedAuthData)) ===
+      serializeComparable(createComparableAuthSnapshot(authData))
+    ) {
+      return false;
+    }
+
+    await this.replaceProfileAuth(profileId, authData);
+    return true;
+  }
+
+  async syncCurrentAuthToMatchingProfile() {
+    const authData = await this.loadCurrentAuthData();
+    if (!authData) {
+      return {
+        hasAuth: false,
+        profileId: undefined,
+        updated: false
+      };
+    }
+
+    const profile = await this.findProfileMatchingAuthData(authData);
+    if (!profile) {
+      return {
+        hasAuth: true,
+        profileId: undefined,
+        updated: false
+      };
+    }
+
+    const updated = await this.syncStoredProfileAuth(profile.id, authData);
+    this.lastSyncedProfileId = profile.id;
+    return {
+      hasAuth: true,
+      profileId: profile.id,
+      updated
+    };
+  }
+
   async maybeSyncToCodexAuthFile(profileId) {
-    if (!profileId || this.lastSyncedProfileId === profileId) {
+    if (!profileId) {
+      return;
+    }
+
+    const profile = await this.getProfile(profileId);
+    const currentAuthData = await this.loadCurrentAuthData();
+    if (profile && currentAuthData && this.matchesAuth(profile, currentAuthData)) {
+      await this.syncStoredProfileAuth(profileId, currentAuthData);
+      this.lastSyncedProfileId = profileId;
+      return;
+    }
+
+    if (this.lastSyncedProfileId === profileId) {
       return;
     }
 

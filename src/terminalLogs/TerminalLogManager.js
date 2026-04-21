@@ -4,9 +4,11 @@ const vscode = require('vscode');
 const { loadConfiguration, TERMINAL_CAPTURE_API_HINT } = require('../config');
 const {
   ensureDirectory,
+  fileExistsSync,
   readTextFileIfExists,
   writeTextFile
 } = require('../files/fileSystem');
+const { SelectionPairRetentionStore } = require('./SelectionPairRetentionStore');
 const { TerminalLogCleaner } = require('./TerminalLogCleaner');
 const {
   buildSelectionSnapshotPath,
@@ -36,6 +38,7 @@ class TerminalLogManager {
     this.configuration = loadConfiguration();
     this.logDirectory = '';
     this.cleaner = new TerminalLogCleaner(output);
+    this.selectionPairRetentionStore = new SelectionPairRetentionStore(output, logger);
     this.commandSnapshotter = new TerminalCommandSnapshotter(output, logger);
     this.terminalWriteApiAvailable = false;
     this.shellExecutionApiAvailable = false;
@@ -59,7 +62,7 @@ class TerminalLogManager {
       });
     this.runtimeDisposables.push(
       vscode.window.onDidOpenTerminal((terminal) => {
-        if (this.configuration.enabled) {
+        if (this.isCaptureEnabled()) {
           void this.ensureState(terminal);
         }
       }),
@@ -87,7 +90,7 @@ class TerminalLogManager {
       try {
         this.runtimeDisposables.push(
           onDidWriteTerminalData((event) => {
-            if (!this.configuration.enabled) {
+            if (!this.isCaptureEnabled()) {
               return;
             }
 
@@ -107,7 +110,7 @@ class TerminalLogManager {
       try {
         this.runtimeDisposables.push(
           onDidStartTerminalShellExecution((event) => {
-            if (!this.configuration.enabled) {
+            if (!this.isCaptureEnabled()) {
               return;
             }
 
@@ -134,7 +137,7 @@ class TerminalLogManager {
 
     await this.reloadConfiguration(false);
 
-    if (!terminalWriteApiAvailable && !shellExecutionApiAvailable) {
+    if (this.isCaptureEnabled() && !terminalWriteApiAvailable && !shellExecutionApiAvailable) {
       this.logger &&
         this.logger.warn('No terminal capture APIs are available.', {
           shellExecutionApiAvailable: false,
@@ -153,23 +156,36 @@ class TerminalLogManager {
     this.logDirectory = resolveLogDirectory(this.context, this.configuration.logDirectory);
     this.logger &&
       this.logger.info('Reloading terminal recorder configuration.', {
-        enabled: this.configuration.enabled,
+        enabled: this.isCaptureEnabled(),
         logDirectory: this.logDirectory,
-        maxBytes: this.configuration.maxBytes
+        maxBytes: this.configuration.maxBytes,
+        selectionPairRetentionCount: this.configuration.selectionPairRetentionCount
       });
     await ensureDirectory(this.logDirectory);
+    await this.selectionPairRetentionStore.reload(
+      this.logDirectory,
+      this.configuration.selectionPairRetentionCount
+    );
 
     if (isFirstLoad) {
-      await this.cleaner.cleanupDeadLogFiles(this.logDirectory, new Set());
+      await this.cleaner.cleanupDeadLogFiles(
+        this.logDirectory,
+        this.selectionPairRetentionStore.getRetainedFilePaths()
+      );
     }
 
-    if (this.configuration.enabled) {
+    if (this.isCaptureEnabled()) {
       for (const terminal of vscode.window.terminals) {
         await this.ensureState(terminal);
       }
     }
 
+    const retainedFilePaths = this.selectionPairRetentionStore.getRetainedFilePaths();
     const activeFilePaths = new Set();
+
+    for (const filePath of retainedFilePaths) {
+      activeFilePaths.add(filePath);
+    }
 
     for (const [terminal, state] of this.terminalStates) {
       state.selectionAttachmentPaths = state.selectionAttachmentPaths || new Set();
@@ -194,6 +210,17 @@ class TerminalLogManager {
         state.selectionSnapshotPaths.clear();
         state.lastSelectionSnapshotPath = '';
       }
+      state.selectionAttachmentPaths = filterFilePathSet(
+        state.selectionAttachmentPaths,
+        retainedFilePaths
+      );
+      state.selectionSnapshotPaths = filterFilePathSet(
+        state.selectionSnapshotPaths,
+        retainedFilePaths
+      );
+      if (state.lastSelectionSnapshotPath && !retainedFilePaths.has(state.lastSelectionSnapshotPath)) {
+        state.lastSelectionSnapshotPath = '';
+      }
 
       for (const filePath of nextPaths.allFilePaths) {
         activeFilePaths.add(filePath);
@@ -211,16 +238,28 @@ class TerminalLogManager {
     await this.cleaner.cleanupDeadLogFiles(this.logDirectory, activeFilePaths);
 
     if (previousLogDirectory && previousLogDirectory !== this.logDirectory) {
-      await this.cleaner.cleanupDeadLogFiles(previousLogDirectory, new Set());
+      const previousRetentionStore = new SelectionPairRetentionStore(this.output, this.logger);
+      await previousRetentionStore.reload(
+        previousLogDirectory,
+        this.configuration.selectionPairRetentionCount
+      );
+      await this.cleaner.cleanupDeadLogFiles(
+        previousLogDirectory,
+        previousRetentionStore.getRetainedFilePaths()
+      );
     }
 
     if (notify) {
-      const status = this.configuration.enabled ? 'enabled' : 'disabled';
+      const status = this.isCaptureEnabled() ? 'enabled' : 'disabled';
       vscode.window.setStatusBarMessage(
         `Send to Codex ${status}, ${formatMegabytes(this.configuration.maxBytes)} MB per terminal`,
         3000
       );
     }
+  }
+
+  isCaptureEnabled() {
+    return Boolean(this.configuration.enabled && this.configuration.sendToCodexEnabled);
   }
 
   async openLogDirectory() {
@@ -278,13 +317,7 @@ class TerminalLogManager {
     this.terminalStates.delete(terminal);
     this.emitCapturedTerminalCountChanged();
     await state.sink.dispose();
-    const selectionAttachmentPaths = state.selectionAttachmentPaths || new Set();
-    const selectionSnapshotPaths = state.selectionSnapshotPaths || new Set();
-    await this.cleaner.deleteTerminalFiles([
-      ...state.paths.allFilePaths,
-      ...selectionAttachmentPaths,
-      ...selectionSnapshotPaths
-    ]);
+    await this.cleaner.deleteTerminalFiles(state.paths.allFilePaths);
   }
 
   getCapturedTerminalCount() {
@@ -503,12 +536,16 @@ class TerminalLogManager {
       }
     }
 
-    const snapshotPath = buildSelectionSnapshotPath(
-      state.paths,
-      state.nextSelectionSnapshotNumber,
-      'txt'
-    );
-    state.nextSelectionSnapshotNumber += 1;
+    let snapshotPath;
+    do {
+      snapshotPath = buildSelectionSnapshotPath(
+        state.paths,
+        state.nextSelectionSnapshotNumber,
+        'txt'
+      );
+      state.nextSelectionSnapshotNumber += 1;
+    } while (fileExistsSync(snapshotPath));
+
     state.selectionSnapshotPaths.add(snapshotPath);
     state.lastSelectionSnapshotPath = snapshotPath;
     await writeTextFile(snapshotPath, snapshotText);
@@ -519,6 +556,10 @@ class TerminalLogManager {
       reusedExistingSnapshot: false,
       text: snapshotText
     };
+  }
+
+  async recordSelectionPair(selectionFilePath, snapshotFilePath) {
+    await this.selectionPairRetentionStore.recordPair(selectionFilePath, snapshotFilePath);
   }
 
   recordSnapshotCaptureResult(terminal, state, result, hadCapturedData) {
@@ -546,6 +587,10 @@ function formatStateCaptureSummary(state) {
 
 function normalizeSnapshotText(value) {
   return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function filterFilePathSet(filePaths, retainedFilePaths) {
+  return new Set([...filePaths].filter((filePath) => retainedFilePaths.has(filePath)));
 }
 
 function buildShellExecutionPreamble(event) {

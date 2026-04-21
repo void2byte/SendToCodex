@@ -9,38 +9,81 @@ const {
   loadAuthDataFromFile,
   shouldUseWslAuthPath
 } = require('./authManager');
+const { areProfileFeaturesEnabled } = require('./featureFlags');
 const { formatCompactRateSummary, getProfileRateStatus } = require('./profileStatus');
 const { RateLimitDetailsPanel } = require('./webview');
 
+function hasRequiredStoredTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object') {
+    return false;
+  }
+
+  return ['idToken', 'accessToken', 'refreshToken'].every((key) => {
+    return typeof tokens[key] === 'string' && tokens[key].trim();
+  });
+}
+
+async function getProfileAuthState(profileManager, profileId) {
+  const tokens = await profileManager.readStoredTokens(profileId);
+  if (!tokens || typeof tokens !== 'object') {
+    return {
+      hasIssue: true,
+      description: 'Auth required'
+    };
+  }
+
+  if (!hasRequiredStoredTokens(tokens)) {
+    return {
+      hasIssue: true,
+      description: 'Auth issue'
+    };
+  }
+
+  return {
+    hasIssue: false,
+    description: undefined
+  };
+}
+
 async function buildProfileQuickPickItems(profiles, activeProfileId, profileManager) {
-  return Promise.all(profiles.map(async (profile) => {
+  const items = await Promise.all(profiles.map(async (profile) => {
     const status = getProfileRateStatus(profile);
     const descriptionParts = [];
-    const hasTokens = await profileManager.hasStoredTokens(profile.id);
+    const authState = await getProfileAuthState(profileManager, profile.id);
+    const isActive = profile.id === activeProfileId;
 
+    if (isActive) {
+      descriptionParts.push('ACTIVE PROFILE');
+    }
+    if (authState.description) {
+      descriptionParts.push(authState.description);
+    }
     if (profile.email && profile.email !== 'Unknown') {
       descriptionParts.push(profile.email);
     }
-    if (profile.id === activeProfileId) {
-      descriptionParts.push('Active');
-    }
-    if (!hasTokens) {
-      descriptionParts.push('Auth required');
-    }
 
     return {
-      label: `${profile.name} ${hasTokens ? status.icon : '$(warning)'}`,
+      label: profile.name,
       description: descriptionParts.length ? descriptionParts.join(' • ') : undefined,
-      detail: hasTokens
-        ? formatCompactRateSummary(status, Date.now(), {
+      detail: authState.hasIssue
+        ? `${isActive ? 'Currently selected • ' : ''}Restore the matching auth.json for this account`
+        : `${isActive ? 'Currently selected • ' : ''}${formatCompactRateSummary(status, Date.now(), {
             includePrimaryCountdown: true,
             includeSecondaryCountdown: true,
             percentageMode: 'remaining'
-          })
-        : 'Restore the matching auth.json for this account',
-      profileId: profile.id
+          })}`,
+      profileId: profile.id,
+      isActive,
+      alwaysShow: isActive
     };
   }));
+
+  return items.sort((left, right) => {
+    if (left.isActive !== right.isActive) {
+      return left.isActive ? -1 : 1;
+    }
+    return left.label.localeCompare(right.label);
+  });
 }
 
 async function buildAddCurrentProfileItem(profileManager) {
@@ -86,8 +129,50 @@ function buildReloadWindowToggleItem(enabled) {
   };
 }
 
-function buildSwitchQuickPickItems(profileItems, addCurrentProfileItem, reloadEnabled) {
-  const items = [...profileItems];
+function buildSendToCodexToggleItem(enabled) {
+  const disabled = !enabled;
+  return {
+    label: `${disabled ? '$(check)' : '$(circle-large-outline)'} Disable Send to Codex`,
+    description: disabled ? 'On' : 'Off',
+    detail:
+      'Turns off Send to Codex capture, popups, status buttons, and attach commands while keeping profiles available.',
+    sendToggle: true
+  };
+}
+
+function buildManageProfilesItem() {
+  return {
+    label: '$(settings-gear) More profile actions...',
+    detail: 'Open the full profile management menu.',
+    command: 'codex-switch.profile.manage'
+  };
+}
+
+function buildSwitchQuickPickItems(
+  profileItems,
+  addCurrentProfileItem,
+  reloadEnabled,
+  sendToCodexEnabled
+) {
+  const items = [];
+  const activeItems = profileItems.filter((item) => item.isActive);
+  const inactiveItems = profileItems.filter((item) => !item.isActive);
+
+  if (activeItems.length > 0) {
+    items.push({
+      label: 'Active profile',
+      kind: vscode.QuickPickItemKind.Separator
+    });
+    items.push(...activeItems);
+  }
+
+  if (inactiveItems.length > 0) {
+    items.push({
+      label: activeItems.length > 0 ? 'Other profiles' : 'Saved profiles',
+      kind: vscode.QuickPickItemKind.Separator
+    });
+    items.push(...inactiveItems);
+  }
 
   if (addCurrentProfileItem) {
     if (items.length > 0) {
@@ -101,10 +186,12 @@ function buildSwitchQuickPickItems(profileItems, addCurrentProfileItem, reloadEn
 
   items.push(
     {
-      label: 'Apply changes',
+      label: 'Extension',
       kind: vscode.QuickPickItemKind.Separator
     },
-    buildReloadWindowToggleItem(reloadEnabled)
+    buildReloadWindowToggleItem(reloadEnabled),
+    buildSendToCodexToggleItem(sendToCodexEnabled),
+    buildManageProfilesItem()
   );
 
   return items;
@@ -114,7 +201,9 @@ function showProfileSwitchQuickPick(
   profileItems,
   addCurrentProfileItem,
   getReloadEnabled,
-  setReloadEnabled
+  setReloadEnabled,
+  getSendToCodexEnabled,
+  setSendToCodexEnabled
 ) {
   return new Promise((resolve) => {
     const quickPick = vscode.window.createQuickPick();
@@ -130,11 +219,18 @@ function showProfileSwitchQuickPick(
     };
 
     const rebuildItems = () => {
-      quickPick.items = buildSwitchQuickPickItems(
+      const items = buildSwitchQuickPickItems(
         profileItems,
         addCurrentProfileItem,
-        getReloadEnabled()
+        getReloadEnabled(),
+        getSendToCodexEnabled()
       );
+      quickPick.items = items;
+
+      const activeProfileItem = items.find((item) => item && item.isActive);
+      if (activeProfileItem) {
+        quickPick.activeItems = [activeProfileItem];
+      }
     };
 
     quickPick.title = 'Codex Switch';
@@ -153,6 +249,17 @@ function showProfileSwitchQuickPick(
         quickPick.busy = true;
         try {
           await setReloadEnabled(!getReloadEnabled());
+          rebuildItems();
+        } finally {
+          quickPick.busy = false;
+        }
+        return;
+      }
+
+      if (selection.sendToggle) {
+        quickPick.busy = true;
+        try {
+          await setSendToCodexEnabled(!getSendToCodexEnabled());
           rebuildItems();
         } finally {
           quickPick.busy = false;
@@ -187,6 +294,12 @@ function registerProfileCommands(
       .get('reloadWindowAfterProfileSwitch', false)
   );
 
+  const getSendToCodexEnabled = () => Boolean(
+    vscode.workspace
+      .getConfiguration('codexTerminalRecorder')
+      .get('sendToCodexEnabled', true)
+  );
+
   const setReloadWindowAfterProfileSwitch = async (enabled) => {
     await vscode.workspace
       .getConfiguration('codexSwitch')
@@ -197,19 +310,215 @@ function registerProfileCommands(
       );
   };
 
+  const setSendToCodexEnabled = async (enabled) => {
+    await vscode.workspace
+      .getConfiguration('codexTerminalRecorder')
+      .update('sendToCodexEnabled', Boolean(enabled), vscode.ConfigurationTarget.Global);
+  };
+
+  const ensureProfileFeaturesEnabled = async () => {
+    if (areProfileFeaturesEnabled()) {
+      return true;
+    }
+
+    const enableLabel = 'Enable profiles';
+    const openSettingsLabel = 'Open settings';
+    const selection = await vscode.window.showInformationMessage(
+      'Codex profiles and rate limits are disabled.',
+      enableLabel,
+      openSettingsLabel
+    );
+
+    if (selection === enableLabel) {
+      await vscode.workspace
+        .getConfiguration('codexSwitch')
+        .update('enabled', true, vscode.ConfigurationTarget.Global);
+      return true;
+    }
+
+    if (selection === openSettingsLabel) {
+      await vscode.commands.executeCommand('codexTerminalRecorder.openSettings');
+    }
+
+    return false;
+  };
+
   const maybeReloadWindowAfterProfileSwitch = async () => {
     if (getReloadWindowAfterProfileSwitch()) {
       await vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
   };
 
-  const afterProfileSwitch = async () => {
+  const afterProfileSwitch = async (options = {}) => {
+    const { reloadWindow = true } = options;
+
     await rateLimitMonitor.refresh(true);
     await refreshProfileUi();
-    await maybeReloadWindowAfterProfileSwitch();
+    if (reloadWindow) {
+      await maybeReloadWindowAfterProfileSwitch();
+    }
+  };
+
+  const setActiveProfileAndRefresh = async (profileId, options = {}) => {
+    const { reloadWindowOnSwitch = true } = options;
+    const previousProfileId = await profileManager.getActiveProfileId();
+    const changedProfile = previousProfileId !== profileId;
+    const switched = await profileManager.setActiveProfileId(profileId);
+    if (!switched) {
+      return false;
+    }
+
+    await afterProfileSwitch({
+      reloadWindow: reloadWindowOnSwitch && changedProfile
+    });
+    return true;
   };
 
   const getLoginCommandText = () => (shouldUseWslAuthPath() ? 'wsl codex login' : 'codex login');
+  const getLogoutCommandText = () => (shouldUseWslAuthPath() ? 'wsl codex logout' : 'codex logout');
+  const getReauthCommandText = () => `${getLogoutCommandText()}\n${getLoginCommandText()}`;
+
+  const openTerminalAndRun = async (sequence) => {
+    await vscode.commands.executeCommand('workbench.action.terminal.new');
+    setTimeout(() => {
+      void vscode.commands.executeCommand('workbench.action.terminal.sendSequence', {
+        text: sequence.endsWith('\n') ? sequence : `${sequence}\n`
+      });
+    }, 500);
+  };
+
+  const importCurrentAuthAfterLogin = async (options = {}) => {
+    const { targetProfileId, requireModifiedAfter } = options;
+    const authPath = getDefaultCodexAuthPath(profileManager.logger);
+    const authModifiedAt = profileManager.getAuthFileModifiedAt();
+
+    if (
+      requireModifiedAfter &&
+      authModifiedAt &&
+      authModifiedAt < requireModifiedAfter
+    ) {
+      void vscode.window.showWarningMessage(
+        `The Codex auth file at ${authPath} has not changed since this login flow started. Finish the browser login first, then import again.`
+      );
+      return false;
+    }
+
+    const authData = await loadAuthDataFromFile(authPath, profileManager.logger);
+    if (!authData) {
+      void vscode.window.showErrorMessage(`Could not read auth from ${authPath}.`);
+      return false;
+    }
+
+    if (!targetProfileId) {
+      await vscode.commands.executeCommand('codex-switch.profile.addFromCodexAuthFile');
+      return true;
+    }
+
+    const targetProfile = await profileManager.getProfile(targetProfileId);
+    if (!targetProfile) {
+      void vscode.window.showErrorMessage('The selected Codex profile no longer exists.');
+      return false;
+    }
+
+    if (!profileManager.matchesAuth(targetProfile, authData)) {
+      void vscode.window.showErrorMessage(
+        `The current auth.json belongs to a different account and cannot update profile "${targetProfile.name}".`
+      );
+      return false;
+    }
+
+    await profileManager.replaceProfileAuth(targetProfileId, authData);
+    await setActiveProfileAndRefresh(targetProfileId, { reloadWindowOnSwitch: false });
+    void vscode.window.showInformationMessage(
+      `Updated Codex profile "${targetProfile.name}" with the current auth.json.`
+    );
+    return true;
+  };
+
+  const startCodexCliLoginFlow = async (options = {}) => {
+    const { targetProfileId } = options;
+    const authPath = getDefaultCodexAuthPath(profileManager.logger);
+    const targetProfile = targetProfileId ? await profileManager.getProfile(targetProfileId) : null;
+    const startedAt = Date.now();
+    const maxWaitMs = 10 * 60 * 1000;
+    let watcher;
+    let done = false;
+
+    const cleanup = () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      if (watcher) {
+        try {
+          watcher.close();
+        } catch {
+          // Ignore watcher cleanup failures.
+        }
+      }
+    };
+
+    const promptImport = async () => {
+      if (done) {
+        return;
+      }
+      cleanup();
+      const importLabel = targetProfile ? 'Update profile' : 'Import';
+      const message = targetProfile
+        ? `Codex auth file detected at ${authPath}. Update profile "${targetProfile.name}" with it?`
+        : `Codex auth file detected at ${authPath}. Import it as a profile?`;
+      const pick = await vscode.window.showInformationMessage(message, importLabel);
+      if (pick === importLabel) {
+        await importCurrentAuthAfterLogin({ targetProfileId });
+      }
+    };
+
+    try {
+      const authDirectory = path.dirname(authPath);
+      if (fs.existsSync(authDirectory)) {
+        watcher = fs.watch(authDirectory, { persistent: false }, async (_event, filename) => {
+          if (done) {
+            return;
+          }
+          if (!filename || String(filename).toLowerCase() !== 'auth.json') {
+            return;
+          }
+          if (Date.now() - startedAt > maxWaitMs) {
+            cleanup();
+            return;
+          }
+          if (fs.existsSync(authPath)) {
+            await promptImport();
+          }
+        });
+      }
+    } catch {
+      // Best effort only.
+    }
+
+    await openTerminalAndRun(getReauthCommandText());
+
+    const importNowLabel = targetProfile ? 'Update after login' : 'Import after login';
+    const manageLabel = 'Manage profiles';
+    const followUp = await vscode.window.showInformationMessage(
+      `Complete the Codex login flow. It starts with "${getLogoutCommandText()}" to clear revoked refresh tokens, then runs "${getLoginCommandText()}".`,
+      importNowLabel,
+      manageLabel
+    );
+
+    if (followUp === importNowLabel) {
+      cleanup();
+      await importCurrentAuthAfterLogin({
+        targetProfileId,
+        requireModifiedAfter: startedAt
+      });
+    } else if (followUp === manageLabel) {
+      cleanup();
+      await vscode.commands.executeCommand('codex-switch.profile.manage');
+    } else {
+      setTimeout(() => cleanup(), maxWaitMs);
+    }
+  };
 
   const getStatusBarClickBehavior = () => {
     const behavior = vscode.workspace
@@ -226,13 +535,13 @@ function registerProfileCommands(
   };
 
   const loginCommand = vscode.commands.registerCommand('codex-switch.login', async () => {
-    const loginCommandText = getLoginCommandText();
+    const reauthCommandText = getReauthCommandText();
     const manageLabel = 'Manage profiles';
     const openTerminalLabel = 'Open terminal';
-    const copyCommandLabel = 'Copy command';
+    const copyCommandLabel = 'Copy commands';
 
     const selection = await vscode.window.showInformationMessage(
-      `Authentication required. Add a profile or run "${loginCommandText}".`,
+      `Authentication required. Add a profile or run "${getLogoutCommandText()}" and "${getLoginCommandText()}".`,
       manageLabel,
       openTerminalLabel,
       copyCommandLabel
@@ -244,24 +553,23 @@ function registerProfileCommands(
     }
 
     if (selection === openTerminalLabel) {
-      await vscode.commands.executeCommand('workbench.action.terminal.new');
-      setTimeout(() => {
-        void vscode.commands.executeCommand('workbench.action.terminal.sendSequence', {
-          text: `${loginCommandText}\n`
-        });
-      }, 500);
+      await openTerminalAndRun(reauthCommandText);
       return;
     }
 
     if (selection === copyCommandLabel) {
-      await vscode.env.clipboard.writeText(loginCommandText);
-      void vscode.window.showInformationMessage(`Command "${loginCommandText}" copied to clipboard.`);
+      await vscode.env.clipboard.writeText(reauthCommandText);
+      void vscode.window.showInformationMessage('Codex logout/login commands copied to clipboard.');
     }
   });
 
   const switchProfileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.switch',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const profiles = await profileManager.listProfiles();
       const addCurrentProfileItem = await buildAddCurrentProfileItem(profileManager);
       if (!profiles.length && !addCurrentProfileItem) {
@@ -279,7 +587,9 @@ function registerProfileCommands(
         profileItems,
         addCurrentProfileItem,
         getReloadWindowAfterProfileSwitch,
-        setReloadWindowAfterProfileSwitch
+        setReloadWindowAfterProfileSwitch,
+        getSendToCodexEnabled,
+        setSendToCodexEnabled
       );
 
       if (!selection) {
@@ -291,42 +601,49 @@ function registerProfileCommands(
         return;
       }
 
-      const switched = await profileManager.setActiveProfileId(selection.profileId);
+      const switched = await setActiveProfileAndRefresh(selection.profileId);
       if (!switched) {
         return;
       }
-
-      await afterProfileSwitch();
     }
   );
 
   const activateProfileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.activate',
     async (profileId) => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       if (!profileId) {
         await vscode.commands.executeCommand('codex-switch.profile.switch');
         return;
       }
 
-      const switched = await profileManager.setActiveProfileId(profileId);
+      const switched = await setActiveProfileAndRefresh(profileId);
       if (!switched) {
         return;
       }
-
-      await afterProfileSwitch();
     }
   );
 
   const toggleLastProfileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.toggleLast',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       if (getStatusBarClickBehavior() === 'toggleLast') {
+        const activeProfileId = await profileManager.getActiveProfileId();
         const toggledProfileId = await profileManager.toggleLastProfileId();
         if (!toggledProfileId) {
           await vscode.commands.executeCommand('codex-switch.profile.switch');
           return;
         }
-        await afterProfileSwitch();
+        await afterProfileSwitch({
+          reloadWindow: activeProfileId !== toggledProfileId
+        });
         return;
       }
 
@@ -339,17 +656,20 @@ function registerProfileCommands(
       const activeProfileId = await profileManager.getActiveProfileId();
       const currentIndex = profiles.findIndex((profile) => profile.id === activeProfileId);
       const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % profiles.length;
-      const switched = await profileManager.setActiveProfileId(profiles[nextIndex].id);
+      const switched = await setActiveProfileAndRefresh(profiles[nextIndex].id);
       if (!switched) {
         return;
       }
-      await afterProfileSwitch();
     }
   );
 
   const addFromCodexAuthFileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.addFromCodexAuthFile',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const authPath = getDefaultCodexAuthPath(profileManager.logger);
       const loginCommandText = getLoginCommandText();
       const authData = await loadAuthDataFromFile(authPath, profileManager.logger);
@@ -365,8 +685,7 @@ function registerProfileCommands(
         const existingHasTokens = await profileManager.hasStoredTokens(existing.id);
         if (!existingHasTokens) {
           await profileManager.replaceProfileAuth(existing.id, authData);
-          await profileManager.setActiveProfileId(existing.id);
-          await afterProfileSwitch();
+          await setActiveProfileAndRefresh(existing.id, { reloadWindowOnSwitch: false });
           return;
         }
 
@@ -381,8 +700,7 @@ function registerProfileCommands(
         }
 
         await profileManager.replaceProfileAuth(existing.id, authData);
-        await profileManager.setActiveProfileId(existing.id);
-        await afterProfileSwitch();
+        await setActiveProfileAndRefresh(existing.id, { reloadWindowOnSwitch: false });
         return;
       }
 
@@ -399,98 +717,57 @@ function registerProfileCommands(
       }
 
       const profile = await profileManager.createProfile(name, authData);
-      await profileManager.setActiveProfileId(profile.id);
-      await afterProfileSwitch();
+      await setActiveProfileAndRefresh(profile.id, { reloadWindowOnSwitch: false });
     }
   );
 
   const loginViaCliCommand = vscode.commands.registerCommand(
     'codex-switch.profile.login',
     async () => {
-      const authPath = getDefaultCodexAuthPath(profileManager.logger);
-      const loginSequence = `${getLoginCommandText()}\n`;
-
-      await vscode.commands.executeCommand('workbench.action.terminal.new');
-      setTimeout(() => {
-        void vscode.commands.executeCommand('workbench.action.terminal.sendSequence', {
-          text: loginSequence
-        });
-      }, 500);
-
-      const startedAt = Date.now();
-      const maxWaitMs = 10 * 60 * 1000;
-      let watcher;
-      let done = false;
-
-      const cleanup = () => {
-        if (done) {
-          return;
-        }
-        done = true;
-        if (watcher) {
-          try {
-            watcher.close();
-          } catch {
-            // Ignore watcher cleanup failures.
-          }
-        }
-      };
-
-      const promptImport = async () => {
-        cleanup();
-        const importLabel = 'Import';
-        const pick = await vscode.window.showInformationMessage(
-          `Codex auth file detected at ${authPath}. Import it as a profile?`,
-          importLabel
-        );
-        if (pick === importLabel) {
-          await vscode.commands.executeCommand('codex-switch.profile.addFromCodexAuthFile');
-        }
-      };
-
-      try {
-        const authDirectory = path.dirname(authPath);
-        if (fs.existsSync(authDirectory)) {
-          watcher = fs.watch(authDirectory, { persistent: false }, async (_event, filename) => {
-            if (!filename || String(filename).toLowerCase() !== 'auth.json') {
-              return;
-            }
-            if (Date.now() - startedAt > maxWaitMs) {
-              cleanup();
-              return;
-            }
-            if (fs.existsSync(authPath)) {
-              await promptImport();
-            }
-          });
-        }
-      } catch {
-        // Best effort only.
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
       }
 
-      const importNowLabel = 'Import now';
-      const manageLabel = 'Manage profiles';
-      const followUp = await vscode.window.showInformationMessage(
-        `After completing the login flow, import the current environment auth.json from ${authPath} as a profile.`,
-        importNowLabel,
-        manageLabel
+      await startCodexCliLoginFlow();
+    }
+  );
+
+  const reauthenticateProfileCommand = vscode.commands.registerCommand(
+    'codex-switch.profile.reauthenticate',
+    async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
+      const activeProfileId = await profileManager.getActiveProfileId();
+      if (!activeProfileId) {
+        await startCodexCliLoginFlow();
+        return;
+      }
+
+      const activeProfile = await profileManager.getProfile(activeProfileId);
+      const profileName = activeProfile ? activeProfile.name : activeProfileId;
+      const continueLabel = 'Log out and sign in';
+      const selection = await vscode.window.showWarningMessage(
+        `Re-authenticate profile "${profileName}"? This runs "${getLogoutCommandText()}" before "${getLoginCommandText()}" so revoked refresh tokens are cleared.`,
+        { modal: true },
+        continueLabel
       );
-
-      if (followUp === importNowLabel) {
-        cleanup();
-        await vscode.commands.executeCommand('codex-switch.profile.addFromCodexAuthFile');
-      } else if (followUp === manageLabel) {
-        cleanup();
-        await vscode.commands.executeCommand('codex-switch.profile.manage');
-      } else {
-        setTimeout(() => cleanup(), maxWaitMs);
+      if (selection !== continueLabel) {
+        return;
       }
+
+      await startCodexCliLoginFlow({ targetProfileId: activeProfileId });
     }
   );
 
   const addFromFileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.addFromFile',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const uri = await vscode.window.showOpenDialog({
         canSelectMany: false,
         openLabel: 'Import auth.json',
@@ -511,8 +788,7 @@ function registerProfileCommands(
         const existingHasTokens = await profileManager.hasStoredTokens(existing.id);
         if (!existingHasTokens) {
           await profileManager.replaceProfileAuth(existing.id, authData);
-          await profileManager.setActiveProfileId(existing.id);
-          await afterProfileSwitch();
+          await setActiveProfileAndRefresh(existing.id, { reloadWindowOnSwitch: false });
           return;
         }
 
@@ -527,8 +803,7 @@ function registerProfileCommands(
         }
 
         await profileManager.replaceProfileAuth(existing.id, authData);
-        await profileManager.setActiveProfileId(existing.id);
-        await afterProfileSwitch();
+        await setActiveProfileAndRefresh(existing.id, { reloadWindowOnSwitch: false });
         return;
       }
 
@@ -545,14 +820,17 @@ function registerProfileCommands(
       }
 
       const profile = await profileManager.createProfile(name, authData);
-      await profileManager.setActiveProfileId(profile.id);
-      await afterProfileSwitch();
+      await setActiveProfileAndRefresh(profile.id, { reloadWindowOnSwitch: false });
     }
   );
 
   const exportSettingsCommand = vscode.commands.registerCommand(
     'codex-switch.profile.exportSettings',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const saveUri = await vscode.window.showSaveDialog({
         saveLabel: 'Export profiles',
         defaultUri: getDefaultSettingsExportUri(),
@@ -574,6 +852,10 @@ function registerProfileCommands(
   const importSettingsCommand = vscode.commands.registerCommand(
     'codex-switch.profile.importSettings',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const uri = await vscode.window.showOpenDialog({
         canSelectMany: false,
         openLabel: 'Import profiles',
@@ -610,6 +892,10 @@ function registerProfileCommands(
   const renameProfileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.rename',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const profiles = await profileManager.listProfiles();
       if (!profiles.length) {
         return;
@@ -643,6 +929,10 @@ function registerProfileCommands(
   const deleteProfileCommand = vscode.commands.registerCommand(
     'codex-switch.profile.delete',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const profiles = await profileManager.listProfiles();
       if (!profiles.length) {
         return;
@@ -678,10 +968,15 @@ function registerProfileCommands(
   const manageProfilesCommand = vscode.commands.registerCommand(
     'codex-switch.profile.manage',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       const authPath = getDefaultCodexAuthPath(profileManager.logger);
       const profiles = await profileManager.listProfiles();
       const hasProfiles = profiles.length > 0;
       const addCurrentProfileItem = await buildAddCurrentProfileItem(profileManager);
+      const disableSendToCodexItem = buildSendToCodexToggleItem(getSendToCodexEnabled());
 
       const action = await vscode.window.showQuickPick(
         [
@@ -689,6 +984,15 @@ function registerProfileCommands(
             label: 'Login via Codex CLI...',
             command: 'codex-switch.profile.login'
           },
+          ...(hasProfiles
+            ? [
+                {
+                  label: 'Re-authenticate active profile...',
+                  detail: 'Clear revoked refresh tokens with codex logout, then sign in again.',
+                  command: 'codex-switch.profile.reauthenticate'
+                }
+              ]
+            : []),
           ...(hasProfiles
             ? [
                 {
@@ -705,6 +1009,7 @@ function registerProfileCommands(
             label: 'Refresh rate limits',
             command: 'codex-ratelimit.refreshStats'
           },
+          disableSendToCodexItem,
           ...(addCurrentProfileItem
             ? [
                 {
@@ -747,6 +1052,12 @@ function registerProfileCommands(
         return;
       }
 
+      if (action.sendToggle) {
+        await setSendToCodexEnabled(!getSendToCodexEnabled());
+        await vscode.commands.executeCommand('codex-switch.profile.manage');
+        return;
+      }
+
       await vscode.commands.executeCommand(action.command);
     }
   );
@@ -754,6 +1065,10 @@ function registerProfileCommands(
   const refreshStatsCommand = vscode.commands.registerCommand(
     'codex-ratelimit.refreshStats',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       await rateLimitMonitor.refresh(true);
       await refreshProfileUi();
     }
@@ -762,6 +1077,10 @@ function registerProfileCommands(
   const showDetailsCommand = vscode.commands.registerCommand(
     'codex-ratelimit.showDetails',
     async () => {
+      if (!(await ensureProfileFeaturesEnabled())) {
+        return;
+      }
+
       RateLimitDetailsPanel.createOrShow(context.extensionUri, profileManager, rateLimitMonitor);
     }
   );
@@ -783,6 +1102,7 @@ function registerProfileCommands(
     toggleLastProfileCommand,
     addFromCodexAuthFileCommand,
     loginViaCliCommand,
+    reauthenticateProfileCommand,
     addFromFileCommand,
     exportSettingsCommand,
     importSettingsCommand,

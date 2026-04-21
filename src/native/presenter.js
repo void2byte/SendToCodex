@@ -1,6 +1,7 @@
 'use strict';
 
 const { MacSelectionPopupPresenter } = require('./darwin/MacSelectionPopupPresenter');
+const { LinuxSelectionPopupPresenter } = require('./linux/LinuxSelectionPopupPresenter');
 const { WindowsSelectionPopupPresenter } = require('./windows/WindowsSelectionPopupPresenter');
 
 function createUnsupportedPresenter(message) {
@@ -32,6 +33,22 @@ function createSelectionPopupPresenter(logger) {
 
     return createUnsupportedPresenter(
       'Native selection popup is unavailable because /usr/bin/swift was not found.'
+    );
+  }
+
+  if (process.platform === 'linux') {
+    const presenter = new LinuxSelectionPopupPresenter(logger);
+    if (presenter.isSupported()) {
+      return presenter;
+    }
+
+    logger &&
+      logger.warn('Native Linux popup support is unavailable because Python Tkinter was not found.', {
+        expectedRuntime: 'python3 with tkinter'
+      });
+
+    return createUnsupportedPresenter(
+      'Native selection popup is unavailable because Python Tkinter was not found.'
     );
   }
 

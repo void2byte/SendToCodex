@@ -107,9 +107,13 @@ class RateLimitDetailsPanel {
 
     const rows = profiles.map((profile) => {
       const status = getProfileRateStatus(profile, now);
+      const activeClass = profile.id === activeProfileId ? 'profile-row active' : 'profile-row';
+      const profileName = profile.id === activeProfileId
+        ? `<span class="active-profile-name">${escapeHtml(profile.name)}</span>`
+        : escapeHtml(profile.name);
       return `
-        <tr>
-          <td>${escapeHtml(profile.name)}${profile.id === activeProfileId ? ' <span class="badge">Active</span>' : ''}</td>
+        <tr class="${activeClass}">
+          <td>${profileName}${profile.id === activeProfileId ? ' <span class="badge active-badge">ACTIVE</span>' : ''}</td>
           <td>${escapeHtml(profile.email || 'Unknown')}</td>
           <td>${escapeHtml(status.planText)}</td>
           <td>${escapeHtml(status.compactText)}</td>
@@ -201,11 +205,20 @@ class RateLimitDetailsPanel {
               padding: 14px;
               background: var(--vscode-sideBar-background);
             }
+            .summary-card.active-profile-card {
+              border-color: var(--vscode-focusBorder);
+              box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+            }
             .header {
               display: flex;
               justify-content: space-between;
               align-items: center;
               gap: 12px;
+            }
+            .title-row {
+              display: flex;
+              align-items: center;
+              gap: 8px;
             }
             .title {
               font-size: 20px;
@@ -214,6 +227,17 @@ class RateLimitDetailsPanel {
             .subtitle {
               color: var(--vscode-descriptionForeground);
               margin-top: 4px;
+            }
+            .active-pill {
+              display: inline-flex;
+              align-items: center;
+              padding: 4px 8px;
+              border-radius: 999px;
+              font-size: 11px;
+              font-weight: 700;
+              letter-spacing: 0.04em;
+              background: var(--vscode-badge-background);
+              color: var(--vscode-badge-foreground);
             }
             button {
               border: 0;
@@ -250,6 +274,9 @@ class RateLimitDetailsPanel {
               color: var(--vscode-badge-foreground);
               font-size: 11px;
             }
+            .active-badge {
+              font-weight: 700;
+            }
             .error {
               color: var(--vscode-errorForeground);
             }
@@ -267,6 +294,23 @@ class RateLimitDetailsPanel {
               color: var(--vscode-descriptionForeground);
               font-weight: 600;
             }
+            .profile-row.active td {
+              background: rgba(46, 160, 67, 0.14);
+              background: color-mix(in srgb, var(--vscode-charts-green, #2ea043) 16%, transparent);
+              color: var(--vscode-editor-foreground);
+              border-bottom-color: var(--vscode-charts-green, #2ea043);
+            }
+            .profile-row.active td:first-child {
+              box-shadow: inset 3px 0 0 var(--vscode-charts-green, #2ea043);
+            }
+            .profile-row.active .active-profile-name {
+              color: var(--vscode-charts-green, #2ea043);
+              font-weight: 700;
+            }
+            .profile-row.active .badge {
+              background: var(--vscode-charts-green, #2ea043);
+              color: var(--vscode-editor-background);
+            }
             .empty {
               color: var(--vscode-descriptionForeground);
             }
@@ -274,10 +318,13 @@ class RateLimitDetailsPanel {
         </head>
         <body>
           <div class="layout">
-            <div class="summary-card">
+            <div class="summary-card${activeProfile ? ' active-profile-card' : ''}">
               <div class="header">
                 <div>
-                  <div class="title">Codex profiles and limits</div>
+                  <div class="title-row">
+                    <div class="title">Codex profiles and limits</div>
+                    ${activeProfile ? '<div class="active-pill">ACTIVE PROFILE</div>' : ''}
+                  </div>
                   <div class="subtitle">${
                     activeProfile
                       ? `${escapeHtml(activeProfile.name)} - ${escapeHtml(activeStatus.compactText)}`

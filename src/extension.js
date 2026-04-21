@@ -4,6 +4,7 @@ const {
   CONFIG_SECTION,
   DIAGNOSTICS_LOG_FILE_ENABLED_DEFAULT,
   DIAGNOSTICS_LOGGING_ENABLED_DEFAULT,
+  isSendToCodexEnabled,
   OUTPUT_CHANNEL_NAME
 } = require('./config');
 const { FileLogger } = require('./logging/FileLogger');
@@ -17,12 +18,12 @@ const { ExplorerResourcesCodexSender } = require('./codex/ExplorerResourcesCodex
 const { TerminalSelectionCodexSender } = require('./codex/TerminalSelectionCodexSender');
 const { createSelectionPopupPresenter } = require('./native/presenter');
 const { registerProfileCommands } = require('./profiles/commands');
+const { areProfileFeaturesEnabled } = require('./profiles/featureFlags');
 const { ProfileManager } = require('./profiles/profileManager');
 const { RateLimitMonitor } = require('./profiles/rateLimitMonitor');
 const { NativeSelectionOverlayController } = require('./ui/NativeSelectionOverlayController');
 const { EditorSelectionStatusBarController } = require('./ui/EditorSelectionStatusBarController');
 const { ProfileStatusBarController } = require('./profiles/statusBar');
-const { RecorderSettingsStatusBarController } = require('./ui/RecorderSettingsStatusBarController');
 const { SelectionPopupSuppression } = require('./ui/SelectionPopupSuppression');
 const { TerminalSelectionStatusBarController } = require('./ui/TerminalSelectionStatusBarController');
 
@@ -76,11 +77,6 @@ function activate(context) {
     codexAvailabilityController,
     logger
   );
-  const recorderSettingsStatusBarController = new RecorderSettingsStatusBarController(
-    codexAvailabilityController,
-    manager,
-    logger
-  );
   const statusBarController = new TerminalSelectionStatusBarController(
     codexAvailabilityController,
     logger
@@ -88,7 +84,6 @@ function activate(context) {
   context.subscriptions.push(codexAvailabilityController);
   context.subscriptions.push(nativeSelectionOverlayController);
   context.subscriptions.push(editorStatusBarController);
-  context.subscriptions.push(recorderSettingsStatusBarController);
   context.subscriptions.push(statusBarController);
 
   let latestProfileUiRefreshId = 0;
@@ -115,6 +110,10 @@ function activate(context) {
   };
 
   const maybeNotifyUnmanagedCurrentProfile = async () => {
+    if (!areProfileFeaturesEnabled()) {
+      return;
+    }
+
     let shouldRecheckAfterNotice = false;
     if (unmanagedAuthNoticeInFlight) {
       return;
@@ -177,6 +176,11 @@ function activate(context) {
     const refreshId = ++latestProfileUiRefreshId;
 
     try {
+      if (!areProfileFeaturesEnabled()) {
+        profileStatusBarController.update(null, []);
+        return;
+      }
+
       const profiles = await profileManager.listProfiles();
       const activeProfileId = await profileManager.getActiveProfileId();
       if (refreshId !== latestProfileUiRefreshId) {
@@ -208,12 +212,43 @@ function activate(context) {
     }
   };
 
+  const handleProfileWatcherChange = async () => {
+    if (!areProfileFeaturesEnabled()) {
+      await refreshProfileUi();
+      return;
+    }
+
+    await profileManager.syncCurrentAuthToMatchingProfile();
+    await refreshProfileUi();
+    await rateLimitMonitor.refresh(true);
+  };
+
   registerProfileCommands(context, profileManager, rateLimitMonitor, refreshProfileUi);
+
+  const ensureSendToCodexEnabled = async () => {
+    if (isSendToCodexEnabled()) {
+      return true;
+    }
+
+    const enableLabel = 'Enable Send to Codex';
+    const selection = await vscode.window.showInformationMessage(
+      'Send to Codex is currently disabled.',
+      enableLabel
+    );
+
+    if (selection === enableLabel) {
+      await vscode.workspace
+        .getConfiguration(CONFIG_SECTION)
+        .update('sendToCodexEnabled', true, vscode.ConfigurationTarget.Global);
+      return true;
+    }
+
+    return false;
+  };
 
   context.subscriptions.push(
     codexAvailabilityController.onDidChangeAvailability(() => {
       void editorStatusBarController.refresh();
-      void recorderSettingsStatusBarController.refresh();
       void statusBarController.refresh();
     }),
     profileManager.onDidChange(() => {
@@ -223,8 +258,7 @@ function activate(context) {
       void refreshProfileUi();
     }),
     ...profileManager.createWatchers(() => {
-      void refreshProfileUi();
-      void rateLimitMonitor.refresh(true);
+      void handleProfileWatcherChange();
     }),
     vscode.commands.registerCommand('codexTerminalRecorder.openLogDirectory', async () => {
       await manager.openLogDirectory();
@@ -248,7 +282,7 @@ function activate(context) {
     vscode.commands.registerCommand('codexTerminalRecorder.openSettings', async () => {
       await vscode.commands.executeCommand(
         'workbench.action.openSettings',
-        `@ext:${context.extension.id} ${CONFIG_SECTION}`
+        `@ext:${context.extension.id}`
       );
     }),
     vscode.commands.registerCommand(
@@ -294,12 +328,18 @@ function activate(context) {
     vscode.commands.registerCommand(
       'codexTerminalRecorder.addExplorerResourceToCodexChat',
       async (resource, selection) => {
+        if (!(await ensureSendToCodexEnabled())) {
+          return;
+        }
         await explorerResourcesSender.sendExplorerResourcesToCodexChat(resource, selection);
       }
     ),
     vscode.commands.registerCommand(
       'codexTerminalRecorder.addExplorerFolderToCodexChat',
       async (resource, selection) => {
+        if (!(await ensureSendToCodexEnabled())) {
+          return;
+        }
         await explorerResourcesSender.sendExplorerResourcesToCodexChat(resource, selection);
       }
     ),
@@ -312,12 +352,18 @@ function activate(context) {
     vscode.commands.registerCommand(
       'codexTerminalRecorder.sendActiveEditorSelectionToCodexChat',
       async () => {
+        if (!(await ensureSendToCodexEnabled())) {
+          return;
+        }
         await editorSender.sendActiveEditorSelectionToCodexChat();
       }
     ),
     vscode.commands.registerCommand(
       'codexTerminalRecorder.sendActiveTerminalSelectionToCodexChat',
       async () => {
+        if (!(await ensureSendToCodexEnabled())) {
+          return;
+        }
         await codexSender.sendActiveTerminalSelectionToCodexChat();
       }
     ),
@@ -327,7 +373,6 @@ function activate(context) {
         void manager.reloadConfiguration(true);
         void codexAvailabilityController.refresh();
         void editorStatusBarController.refresh();
-        void recorderSettingsStatusBarController.refresh();
         void statusBarController.refresh();
       }
 
@@ -337,6 +382,14 @@ function activate(context) {
       ) {
         void refreshProfileUi();
       }
+
+      if (event.affectsConfiguration('codexSwitch.enabled') && areProfileFeaturesEnabled()) {
+        void (async () => {
+          await profileManager.syncCurrentAuthToMatchingProfile();
+          await profileManager.syncActiveProfileToCodexAuthFile();
+          await rateLimitMonitor.refresh(true);
+        })();
+      }
     })
   );
 
@@ -344,7 +397,6 @@ function activate(context) {
   rateLimitMonitor.activate();
   nativeSelectionOverlayController.activate();
   editorStatusBarController.activate();
-  recorderSettingsStatusBarController.activate();
   statusBarController.activate();
   logger.info('Extension controllers activated.', {
     diagnosticsLogPath: logger.logFilePath,
@@ -353,8 +405,13 @@ function activate(context) {
     terminalWriteApiAvailable: isTerminalWriteApiAvailable()
   });
   void refreshProfileUi();
-  void profileManager.syncActiveProfileToCodexAuthFile();
-  void rateLimitMonitor.refresh(true);
+  if (areProfileFeaturesEnabled()) {
+    void (async () => {
+      await profileManager.syncCurrentAuthToMatchingProfile();
+      await profileManager.syncActiveProfileToCodexAuthFile();
+      await rateLimitMonitor.refresh(true);
+    })();
+  }
   void manager.activate();
 }
 

@@ -1,22 +1,32 @@
 ![ezgif-666ed7ed9c4d2843](https://github.com/user-attachments/assets/17727aad-e997-42b6-8c34-e566323cedef)
 
 
-# Send to Codex
+# Codex Tool 3 in 1
 
-VS Code extension that captures integrated terminal output, resolves terminal selections back to recorded source lines, and sends the result to Codex with native selection actions on Windows and macOS.
+Three-in-one VS Code extension for Send to Codex, Codex account switching, and per-profile rate-limit tracking.
 
-It also includes an embedded Codex account switcher and a per-profile rate-limit monitor, so saved accounts can show their own cooldown state directly in the QuickPick and status bar.
+It captures integrated terminal output, resolves terminal selections back to recorded source lines, and sends the result to Codex with native selection actions on Windows, macOS, and Linux.
+
+It also includes an embedded Codex account switcher and a per-profile rate-limit monitor, with compact 5-hour and weekly limits shown in the QuickPick and status bar.
+
+The three parts can be used together or independently: profiles and limits can be disabled so the extension behaves like the original Send to Codex workflow, and Send to Codex itself can be turned off from the profile menu when needed.
 
 GitHub project: https://github.com/void2byte/SendToCodex
+
+## 3 in 1
+
+- Send terminal selections, editor selections, and Explorer resources to Codex.
+- Switch between multiple saved Codex accounts inside VS Code.
+- Track 5-hour and weekly rate limits per saved profile.
 
 ## What it does
 
 - Captures rolling plain-text output for each integrated terminal.
 - Maintains a line index sidecar to make terminal selection matching more reliable.
 - Sends terminal context to Codex as a compact Markdown bundle file.
-- Creates immutable per-selection terminal snapshots and reuses the previous snapshot file when the buffer did not change.
+- Creates immutable per-selection terminal snapshots, retains the latest terminal selection/snapshot file pairs, and reuses the previous snapshot file when the buffer did not change.
 - Supports editor selections and Explorer file or folder attachments in addition to terminal selections.
-- Shows a native platform popup near terminal and editor selections on Windows and macOS, with optional status bar fallback buttons.
+- Shows a native platform popup near terminal and editor selections on Windows, macOS, and Linux, with optional status bar fallback buttons.
 - Can write a diagnostics log for troubleshooting activation, selection detection, and Codex integration.
 - Saves multiple Codex auth profiles and switches the active `auth.json` from inside VS Code.
 - Tracks Codex session rate-limit windows per saved profile and shows cooldown time remaining for each account.
@@ -24,8 +34,8 @@ GitHub project: https://github.com/void2byte/SendToCodex
 ## Codex profiles and limits
 
 - Use `Codex Switch: Manage Profiles` to import accounts from the current `~/.codex/auth.json`, from another file, or from a previous exported profile bundle.
-- The account status bar item shows the active profile name together with its current cooldown state, for example `Codex: work (Reset in 45m)` or `Codex: personal (Ready)`.
-- The profile switcher QuickPick shows each saved account together with its own readiness state so you can swap to the next available account without guessing.
+- The account status bar item shows compact 5-hour and weekly limit state for the active account.
+- The profile switcher QuickPick shows each saved account with compact per-profile limit state, plus toggles for VS Code reload-after-switch and Send to Codex on or off.
 - `Codex Rate Limit: Show Details` opens a panel with the active profile's latest observed limit windows plus a summary table for every saved profile.
 
 ## How terminal sending works
@@ -49,6 +59,8 @@ Typical output files:
 
 If a new selection snapshot matches the previous snapshot for the same terminal, the extension reuses the existing `.snapshot-xxx.txt` path instead of writing a duplicate file.
 
+By default, the latest 50 terminal selection/snapshot file pairs are retained in the recordings folder even after the terminal is closed or VS Code restarts. Change `codexTerminalRecorder.selectionPairRetentionCount` to keep a different number of pairs.
+
 Use `Send to Codex: Open Log Directory` to open the current recordings folder.
 
 ## Selection tracking strategies
@@ -65,7 +77,15 @@ Use `Send to Codex: Locate Active Terminal Selection` to inspect how the current
 - Select text in an editor and use the popup or `Ctrl+Shift+L` / `Cmd+Shift+L` to send the editor selection.
 - Right-click a file or folder in Explorer and use `Add to Codex Chat` or `Add Folder to Codex Chat`.
 
-The status bar buttons are disabled by default and exist as a fallback when the native popup is not desired.
+The selection-sending status bar buttons are disabled by default and exist as a fallback when the native popup is not desired. Send to Codex settings are available from the Codex accounts hover tooltip.
+
+## Development without repackaging
+
+When working on this repository, connect the current folder to VS Code as a development extension instead of rebuilding a VSIX for every change.
+
+- In this workspace, press `F5` and use `Run Codex Terminal Recorder`; `.vscode/launch.json` passes `--extensionDevelopmentPath=${workspaceFolder}`.
+- Use `Terminal: Run Task` -> `Open Codex Tool Extension Host` to open a new VS Code window with this folder loaded as the development extension.
+- From a terminal, you can also run `code --extensionDevelopmentPath "<repo path>" --enable-proposed-api=screph.codex-terminal-recorder`.
 
 ## Commands
 
@@ -81,6 +101,7 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 - `Codex Switch: Manage Profiles`
 - `Codex Switch: Switch Profile`
 - `Codex Switch: Login via Codex CLI`
+- `Codex Switch: Re-authenticate Active Profile`
 - `Codex Switch: Export Profiles`
 - `Codex Switch: Import Profiles`
 - `Codex Rate Limit: Refresh Statistics`
@@ -88,10 +109,12 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 
 ## Settings
 
+- `codexSwitch.enabled`: enable or disable Codex profiles and rate limits.
 - `codexTerminalRecorder.enabled`: enable or disable terminal capture.
 - `codexTerminalRecorder.terminalContextSendMode`: choose between `contextBundle`, `attachmentFile`, and `editorSelection`.
 - `codexTerminalRecorder.selectionTrackingStrategy`: choose how terminal selection text is captured and mapped back to the log files.
 - `codexTerminalRecorder.selectionContextLines`: number of surrounding lines to include in the context preview.
+- `codexTerminalRecorder.selectionPairRetentionCount`: number of terminal selection/snapshot file pairs to retain across terminal close and VS Code restarts.
 - `codexTerminalRecorder.showNativeTerminalSelectionPopup`: show the native platform popup for terminal selections.
 - `codexTerminalRecorder.showNativeEditorSelectionPopup`: show the native platform popup for editor selections.
 - `codexTerminalRecorder.showCodexSelectionButton`: show the fallback terminal status bar button.
@@ -103,6 +126,7 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 - `codexSwitch.activeProfileScope`: keep the active Codex account global or workspace-local.
 - `codexSwitch.storageMode`: choose between SecretStorage and shared remote files for saved tokens.
 - `codexSwitch.reloadWindowAfterProfileSwitch`: optionally reload VS Code after switching accounts; the profile switcher includes a checkbox for this.
+- The profile switcher also includes a checkbox for temporarily disabling Send to Codex without turning off profiles.
 - `codexSwitch.statusBarClickBehavior`: cycle through profiles or jump back to the previous one.
 - `codexRatelimit.sessionPath`: override the default `~/.codex/sessions` lookup path.
 - `codexRatelimit.refreshInterval`: choose how often cooldown data refreshes.
@@ -112,6 +136,7 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 
 - Windows: native popup support and clipboard change tracking are included out of the box.
 - macOS: native popup support and clipboard change tracking are supported via the system Swift runtime at `/usr/bin/swift`.
+- Linux: native popup support is included through Python Tkinter when available, often packaged as `python3-tk`, but this button has not been tested on Linux yet.
 
 ## Credits
 
@@ -121,6 +146,8 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 
 The extension expects a recent stable VS Code build and the OpenAI VS Code extension so the Codex attach commands are available.
 
-Windows is supported out of the box. On macOS, native popups and clipboard change tracking use the system Swift runtime at `/usr/bin/swift`, which keeps the packaged extension small and avoids bundling extra native binaries.
+Windows is supported out of the box. On macOS, native popups and clipboard change tracking use the system Swift runtime at `/usr/bin/swift`, which keeps the packaged extension small and avoids bundling extra native binaries. On Linux, the native popup uses Python Tkinter when available, often packaged as `python3-tk`; the implementation exists, but its operability has not been tested on Linux yet.
 
 Existing terminal scrollback is not backfilled. Capture starts after the extension begins tracking a terminal and new output is produced. If the raw data stream is unavailable in a particular VS Code build, the extension falls back to shell integration command capture. If that still does not provide enough data, opening the active terminal log or sending terminal context can trigger an on-demand snapshot of the visible terminal buffer.
+
+If Codex reports that a refresh token was revoked, run `Codex Switch: Re-authenticate Active Profile`. The command clears the current Codex auth with `codex logout`, starts `codex login`, and then updates the saved profile from the new `auth.json`.

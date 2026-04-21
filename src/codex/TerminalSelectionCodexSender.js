@@ -1,7 +1,7 @@
 'use strict';
 const vscode = require('vscode');
 const { SELECTION_TRACKING_STRATEGIES, TERMINAL_CONTEXT_SEND_MODES } = require('../config');
-const { writeTextFile } = require('../files/fileSystem');
+const { fileExistsSync, writeTextFile } = require('../files/fileSystem');
 const { formatCaptureHealthForEmptyLog } = require('../terminalLogs/captureHealth');
 const { getRecentTerminalSelectionText } = require('../terminalSelection/selectionSources');
 const { buildSelectionAttachmentPath } = require('../terminalLogs/logPaths');
@@ -218,6 +218,7 @@ class TerminalSelectionCodexSender {
         selectionText: normalizeSelectionText(selectionText)
       })
     );
+    await this.recordSelectionPair(resolution, fallbackPath, selectionSnapshot.filePath);
     return vscode.Uri.file(fallbackPath);
   }
 
@@ -259,6 +260,7 @@ class TerminalSelectionCodexSender {
         terminalName: resolution.terminal.name
       })
     );
+    await this.recordSelectionPair(resolution, attachmentPath, selectionSnapshot.filePath);
     return vscode.Uri.file(attachmentPath);
   }
 
@@ -294,6 +296,7 @@ class TerminalSelectionCodexSender {
   }
 
   async sendResolvedSelectionViaEditorSelection(resolution, result, contextLines) {
+    await this.createResolvedSelectionAttachment(resolution, result, contextLines);
     const session = await this.openContextSelection(result, contextLines);
     const command = await this.codexCommandClient.attachEditorSelection();
     await this.restoreTerminalFocusIfNeeded(resolution.terminal, session.focusTransferred);
@@ -365,15 +368,39 @@ class TerminalSelectionCodexSender {
       throw new Error('The active terminal state is unavailable for creating a selection attachment.');
     }
 
-    const filePath = buildSelectionAttachmentPath(
-      terminalState.paths,
-      terminalState.nextSelectionAttachmentNumber,
-      'md'
-    );
-    terminalState.nextSelectionAttachmentNumber += 1;
+    let filePath;
+    do {
+      filePath = buildSelectionAttachmentPath(
+        terminalState.paths,
+        terminalState.nextSelectionAttachmentNumber,
+        'md'
+      );
+      terminalState.nextSelectionAttachmentNumber += 1;
+    } while (fileExistsSync(filePath));
+
     terminalState.selectionAttachmentPaths = terminalState.selectionAttachmentPaths || new Set();
     terminalState.selectionAttachmentPaths.add(filePath);
     return filePath;
+  }
+
+  async recordSelectionPair(resolution, selectionFilePath, snapshotFilePath) {
+    const terminalLogManager =
+      this.selectionResolver && this.selectionResolver.terminalLogManager;
+    if (!terminalLogManager || typeof terminalLogManager.recordSelectionPair !== 'function') {
+      return;
+    }
+
+    await terminalLogManager.recordSelectionPair(selectionFilePath, snapshotFilePath);
+
+    const terminalState = resolution && resolution.terminalState;
+    if (terminalState) {
+      terminalState.selectionAttachmentPaths = terminalState.selectionAttachmentPaths || new Set();
+      terminalState.selectionSnapshotPaths = terminalState.selectionSnapshotPaths || new Set();
+      terminalState.selectionAttachmentPaths.add(selectionFilePath);
+      if (snapshotFilePath) {
+        terminalState.selectionSnapshotPaths.add(snapshotFilePath);
+      }
+    }
   }
 
   async ensureSelectionSnapshot(resolution) {

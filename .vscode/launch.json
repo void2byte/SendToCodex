@@ -6,7 +6,8 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--enable-proposed-api=local.codex-terminal-recorder"
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--enable-proposed-api=screph.codex-terminal-recorder"
       ]
     }
   ]

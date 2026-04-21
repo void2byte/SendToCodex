@@ -61,6 +61,18 @@ async function deleteFileIfExists(filePath) {
   }
 }
 
+function fileExistsSync(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
 async function listFilePaths(directoryPath) {
   try {
     const entries = await fs.promises.readdir(directoryPath, { withFileTypes: true });
@@ -90,6 +102,7 @@ module.exports = {
   deleteFileIfExists,
   ensureDirectory,
   ensureDirectoryForFile,
+  fileExistsSync,
   listFilePaths,
   readTextFileIfExists,
   writeTextFile

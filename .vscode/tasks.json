@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Open Codex Tool Extension Host",
+      "type": "shell",
+      "command": "code",
+      "windows": {
+        "command": "${env:LOCALAPPDATA}\\Programs\\Microsoft VS Code\\bin\\code.cmd"
+      },
+      "args": [
+        "--new-window",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--enable-proposed-api=screph.codex-terminal-recorder"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

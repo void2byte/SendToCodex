@@ -38,6 +38,12 @@ class EditorSelectionStatusBarController {
 
   async refresh() {
     const configuration = loadConfiguration();
+    if (!configuration.sendToCodexEnabled) {
+      this.hideWithReason('send-disabled');
+      this.statusBarItem.hide();
+      return;
+    }
+
     if (!this.codexAvailabilityController.isAvailable()) {
       this.hideWithReason('codex-unavailable');
       this.statusBarItem.hide();

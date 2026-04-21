@@ -128,7 +128,6 @@ function getProfileRateStatus(profile, now = Date.now()) {
       ? `[Reset in: ${formatDuration(cooldownUntil - now)}]`
       : '[Ready]',
     tooltipText: cooldownActive ? `Reset in ${formatDuration(cooldownUntil - now)}` : 'Ready',
-    icon: cooldownActive ? '$(error)' : '$(check)',
     maxUsedPercent,
     primary,
     secondary,
@@ -171,12 +170,17 @@ function formatCompactWindow(windowState, label, now = Date.now(), options = {})
     return `${label} n/a`;
   }
 
+  const isReady = !windowState.resetAt || windowState.resetAt <= now;
   const percentValue =
     percentageMode === 'remaining'
-      ? Math.max(0, 100 - Math.round(windowState.usedPercent))
-      : Math.round(windowState.usedPercent);
+      ? isReady
+        ? 100
+        : Math.max(0, 100 - Math.round(windowState.usedPercent))
+      : isReady
+        ? 0
+        : Math.round(windowState.usedPercent);
   const percentText = `${percentValue}%`;
-  if (!includeCountdown) {
+  if (!includeCountdown || isReady) {
     return `${label} ${percentText}`;
   }
 

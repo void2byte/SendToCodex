@@ -1,8 +1,8 @@
 {
   "name": "codex-terminal-recorder",
-  "displayName": "Send to Codex",
-  "description": "Capture terminal context, switch Codex accounts, and track per-profile cooldowns directly in VS Code.",
-  "version": "0.0.4",
+  "displayName": "Codex Tool 3 in 1",
+  "description": "Three-in-one VS Code extension for Send to Codex, Codex account switching, and per-profile rate-limit tracking.",
+  "version": "0.0.6",
   "publisher": "screph",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -111,6 +111,10 @@
         "title": "Codex Switch: Login via Codex CLI"
       },
       {
+        "command": "codex-switch.profile.reauthenticate",
+        "title": "Codex Switch: Re-authenticate Active Profile"
+      },
+      {
         "command": "codex-switch.profile.switch",
         "title": "Codex Switch: Switch Profile"
       },
@@ -162,12 +166,12 @@
       "explorer/context": [
         {
           "command": "codexTerminalRecorder.addExplorerResourceToCodexChat",
-          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "when": "resourceScheme == file && !explorerResourceIsFolder && codexTerminalRecorder.codexAvailable",
           "group": "navigation@100"
         },
         {
           "command": "codexTerminalRecorder.addExplorerFolderToCodexChat",
-          "when": "resourceScheme == file && explorerResourceIsFolder",
+          "when": "resourceScheme == file && explorerResourceIsFolder && codexTerminalRecorder.codexAvailable",
           "group": "navigation@100"
         }
       ],
@@ -197,13 +201,19 @@
         "command": "codexTerminalRecorder.sendActiveEditorSelectionToCodexChat",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
-        "when": "editorTextFocus && editorHasSelection && resourceScheme == file"
+        "when": "editorTextFocus && editorHasSelection && resourceScheme == file && codexTerminalRecorder.codexAvailable"
       }
     ],
     "configuration": [
       {
         "title": "Send to Codex",
         "properties": {
+          "codexSwitch.enabled": {
+            "order": 0,
+            "type": "boolean",
+            "default": true,
+            "description": "Enable Codex profile switching and per-profile rate-limit tracking."
+          },
           "codexTerminalRecorder.enabled": {
             "order": 1,
             "type": "boolean",
@@ -250,32 +260,40 @@
             "maximum": 50,
             "description": "Number of surrounding lines to include around the resolved terminal selection when preparing context for Codex."
           },
-          "codexTerminalRecorder.showNativeTerminalSelectionPopup": {
+          "codexTerminalRecorder.selectionPairRetentionCount": {
             "order": 5,
+            "type": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Number of terminal selection attachment and snapshot file pairs to retain across terminal close and VS Code restarts."
+          },
+          "codexTerminalRecorder.showNativeTerminalSelectionPopup": {
+            "order": 6,
             "type": "boolean",
             "default": true,
             "description": "Show a native platform popup action near the cursor when terminal text selection becomes available."
           },
           "codexTerminalRecorder.showNativeEditorSelectionPopup": {
-            "order": 6,
+            "order": 7,
             "type": "boolean",
             "default": true,
             "description": "Show a native platform popup action near the cursor when editor text selection becomes available."
           },
           "codexTerminalRecorder.showCodexSelectionButton": {
-            "order": 7,
+            "order": 8,
             "type": "boolean",
             "default": false,
             "description": "Show a fallback status bar button for sending the active terminal selection to Codex Chat."
           },
           "codexTerminalRecorder.showCodexEditorSelectionButton": {
-            "order": 8,
+            "order": 9,
             "type": "boolean",
             "default": false,
             "description": "Show a fallback status bar button for sending the active editor selection to Codex Chat."
           },
           "codexTerminalRecorder.maxFileSizeMb": {
-            "order": 9,
+            "order": 10,
             "type": "number",
             "default": 1,
             "minimum": 0.1,
@@ -283,19 +301,19 @@
             "description": "Maximum size in megabytes to keep per terminal recording file."
           },
           "codexTerminalRecorder.logDirectory": {
-            "order": 10,
+            "order": 11,
             "type": "string",
             "default": "",
             "markdownDescription": "Directory where terminal recording files are stored. Leave empty to use the extension storage directory outside the workspace (recommended). Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
           },
           "codexTerminalRecorder.diagnosticsLoggingEnabled": {
-            "order": 11,
+            "order": 12,
             "type": "boolean",
             "default": false,
             "description": "Enable diagnostic logging for extension internals."
           },
           "codexTerminalRecorder.diagnosticsLogFileEnabled": {
-            "order": 12,
+            "order": 13,
             "type": "boolean",
             "default": false,
             "markdownDescription": "Write diagnostics into a local log file when diagnostics logging is enabled. [Open diagnostics log](command:codexTerminalRecorder.openDiagnosticsLog)"

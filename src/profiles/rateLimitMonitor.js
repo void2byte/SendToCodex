@@ -1,6 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
+const { areProfileFeaturesEnabled } = require('./featureFlags');
 const { getUsageApiRateLimitData } = require('./rateLimitApiClient');
 const { getRateLimitData } = require('./rateLimitParser');
 
@@ -26,7 +27,24 @@ class RateLimitMonitor {
         this.setWindowFocused(event.focused);
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (!event.affectsConfiguration('codexRatelimit')) {
+        if (
+          !event.affectsConfiguration('codexRatelimit') &&
+          !event.affectsConfiguration('codexSwitch.enabled')
+        ) {
+          return;
+        }
+
+        if (event.affectsConfiguration('codexSwitch.enabled')) {
+          if (areProfileFeaturesEnabled()) {
+            this.startRefreshTimer();
+            void this.refresh(true);
+          } else {
+            this.stopRefreshTimer();
+            this.lastError = null;
+            this.lastObservation = null;
+            this.lastActiveProfileId = null;
+            this.onDidChangeEmitter.fire();
+          }
           return;
         }
 
@@ -102,7 +120,7 @@ class RateLimitMonitor {
   startRefreshTimer() {
     this.stopRefreshTimer();
 
-    if (!this.isWindowFocused) {
+    if (!this.isWindowFocused || !areProfileFeaturesEnabled()) {
       return;
     }
 
@@ -133,6 +151,14 @@ class RateLimitMonitor {
     const refreshId = ++this.latestRefreshId;
 
     try {
+      if (!areProfileFeaturesEnabled()) {
+        this.lastActiveProfileId = null;
+        this.lastError = null;
+        this.lastObservation = null;
+        this.onDidChangeEmitter.fire();
+        return;
+      }
+
       await this.profileManager.clearExpiredCooldowns();
       const activeProfileId = await this.profileManager.getActiveProfileId();
       if (refreshId !== this.latestRefreshId) {
