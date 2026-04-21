@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vscode = require('vscode');
 const { loadConfiguration } = require('../config');
 const { appendTextFile } = require('../files/fileSystem');
 
@@ -28,7 +29,14 @@ class FileLogger {
 
   reloadConfiguration() {
     const configuration = loadConfiguration();
-    this.loggingEnabled = Boolean(configuration.diagnosticsLoggingEnabled);
+    const switchConfiguration = vscode.workspace.getConfiguration('codexSwitch');
+    const rateLimitConfiguration = vscode.workspace.getConfiguration('codexRatelimit');
+
+    this.loggingEnabled = Boolean(
+      configuration.diagnosticsLoggingEnabled ||
+        switchConfiguration.get('debugLogging', false) ||
+        rateLimitConfiguration.get('enableLogging', false)
+    );
     this.logFileEnabled = Boolean(configuration.diagnosticsLogFileEnabled);
   }
 
@@ -45,7 +53,7 @@ class FileLogger {
   }
 
   write(level, message, data) {
-    if (!this.loggingEnabled || !this.logFileEnabled) {
+    if (!this.loggingEnabled) {
       return this.writeChain;
     }
 
@@ -56,6 +64,14 @@ class FileLogger {
       data: data || null
     };
     const line = `${JSON.stringify(payload)}\n`;
+
+    if (this.output) {
+      this.output.appendLine(`[${level}] ${message}${data ? ` ${JSON.stringify(data)}` : ''}`);
+    }
+
+    if (!this.logFileEnabled) {
+      return this.writeChain;
+    }
 
     this.writeChain = this.writeChain
       .then(() => appendTextFile(this.logFilePath, line))

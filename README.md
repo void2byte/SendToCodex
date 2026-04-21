@@ -5,6 +5,8 @@
 
 VS Code extension that captures integrated terminal output, resolves terminal selections back to recorded source lines, and sends the result to Codex with native selection actions on Windows and macOS.
 
+It also includes an embedded Codex account switcher and a per-profile rate-limit monitor, so saved accounts can show their own cooldown state directly in the QuickPick and status bar.
+
 GitHub project: https://github.com/void2byte/SendToCodex
 
 ## What it does
@@ -16,6 +18,15 @@ GitHub project: https://github.com/void2byte/SendToCodex
 - Supports editor selections and Explorer file or folder attachments in addition to terminal selections.
 - Shows a native platform popup near terminal and editor selections on Windows and macOS, with optional status bar fallback buttons.
 - Can write a diagnostics log for troubleshooting activation, selection detection, and Codex integration.
+- Saves multiple Codex auth profiles and switches the active `auth.json` from inside VS Code.
+- Tracks Codex session rate-limit windows per saved profile and shows cooldown time remaining for each account.
+
+## Codex profiles and limits
+
+- Use `Codex Switch: Manage Profiles` to import accounts from the current `~/.codex/auth.json`, from another file, or from a previous exported profile bundle.
+- The account status bar item shows the active profile name together with its current cooldown state, for example `Codex: work (Reset in 45m)` or `Codex: personal (Ready)`.
+- The profile switcher QuickPick shows each saved account together with its own readiness state so you can swap to the next available account without guessing.
+- `Codex Rate Limit: Show Details` opens a panel with the active profile's latest observed limit windows plus a summary table for every saved profile.
 
 ## How terminal sending works
 
@@ -67,6 +78,13 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 - `Send to Codex: Open Settings`
 - `Send to Codex: Toggle Diagnostics Logging`
 - `Send to Codex: Toggle Diagnostics Log File`
+- `Codex Switch: Manage Profiles`
+- `Codex Switch: Switch Profile`
+- `Codex Switch: Login via Codex CLI`
+- `Codex Switch: Export Profiles`
+- `Codex Switch: Import Profiles`
+- `Codex Rate Limit: Refresh Statistics`
+- `Codex Rate Limit: Show Details`
 
 ## Settings
 
@@ -82,6 +100,13 @@ The status bar buttons are disabled by default and exist as a fallback when the 
 - `codexTerminalRecorder.logDirectory`: target directory for recordings. Leave empty to use extension storage outside the workspace.
 - `codexTerminalRecorder.diagnosticsLoggingEnabled`: enable diagnostic logging.
 - `codexTerminalRecorder.diagnosticsLogFileEnabled`: also write diagnostics to a log file on disk.
+- `codexSwitch.activeProfileScope`: keep the active Codex account global or workspace-local.
+- `codexSwitch.storageMode`: choose between SecretStorage and shared remote files for saved tokens.
+- `codexSwitch.reloadWindowAfterProfileSwitch`: optionally reload VS Code after switching accounts; the profile switcher includes a checkbox for this.
+- `codexSwitch.statusBarClickBehavior`: cycle through profiles or jump back to the previous one.
+- `codexRatelimit.sessionPath`: override the default `~/.codex/sessions` lookup path.
+- `codexRatelimit.refreshInterval`: choose how often cooldown data refreshes.
+- `codexRatelimit.color.*`: customize warning and critical colors for the combined profile status bar item.
 
 ## Platform support
 

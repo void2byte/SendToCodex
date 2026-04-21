@@ -1,10 +1,10 @@
 {
   "name": "codex-terminal-recorder",
   "displayName": "Send to Codex",
-  "description": "Capture terminal context and send terminal or editor selections to Codex with native Windows and macOS popups.",
-  "version": "0.0.3",
+  "description": "Capture terminal context, switch Codex accounts, and track per-profile cooldowns directly in VS Code.",
+  "version": "0.0.4",
   "publisher": "screph",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
@@ -25,6 +25,7 @@
     "extension.js",
     "package.json",
     "README.md",
+    "LICENSE",
     "media/**",
     "src/**"
   ],
@@ -96,6 +97,65 @@
         "title": "Send to Codex",
         "category": "Codex",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "codex-switch.login",
+        "title": "Codex Switch: Login"
+      },
+      {
+        "command": "codex-switch.profile.manage",
+        "title": "Codex Switch: Manage Profiles"
+      },
+      {
+        "command": "codex-switch.profile.login",
+        "title": "Codex Switch: Login via Codex CLI"
+      },
+      {
+        "command": "codex-switch.profile.switch",
+        "title": "Codex Switch: Switch Profile"
+      },
+      {
+        "command": "codex-switch.profile.toggleLast",
+        "title": "Codex Switch: Toggle Last Profile"
+      },
+      {
+        "command": "codex-switch.profile.addFromCodexAuthFile",
+        "title": "Codex Switch: Add Profile from Current auth.json"
+      },
+      {
+        "command": "codex-switch.profile.addFromFile",
+        "title": "Codex Switch: Add Profile from File"
+      },
+      {
+        "command": "codex-switch.profile.exportSettings",
+        "title": "Codex Switch: Export Profiles"
+      },
+      {
+        "command": "codex-switch.profile.importSettings",
+        "title": "Codex Switch: Import Profiles"
+      },
+      {
+        "command": "codex-switch.profile.rename",
+        "title": "Codex Switch: Rename Profile"
+      },
+      {
+        "command": "codex-switch.profile.delete",
+        "title": "Codex Switch: Delete Profile"
+      },
+      {
+        "command": "codex-ratelimit.refreshStats",
+        "title": "Codex Rate Limit: Refresh Statistics",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "codex-ratelimit.showDetails",
+        "title": "Codex Rate Limit: Show Details",
+        "icon": "$(table)"
+      },
+      {
+        "command": "codex-ratelimit.openSettings",
+        "title": "Codex Rate Limit: Open Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -117,6 +177,13 @@
           "when": "terminalFocus && terminalTextSelected && codexTerminalRecorder.terminalSelectionSendAvailable",
           "group": "navigation@100"
         }
+      ],
+      "statusBar/item/context": [
+        {
+          "command": "codex-switch.profile.manage",
+          "when": "statusBarItemId == codex-switch.profile",
+          "group": "navigation"
+        }
       ]
     },
     "keybindings": [
@@ -133,106 +200,226 @@
         "when": "editorTextFocus && editorHasSelection && resourceScheme == file"
       }
     ],
-    "configuration": {
-      "title": "Send to Codex",
-      "properties": {
-        "codexTerminalRecorder.enabled": {
-          "order": 1,
-          "type": "boolean",
-          "default": true,
-          "description": "Enable rolling terminal log capture."
-        },
-        "codexTerminalRecorder.terminalContextSendMode": {
-          "order": 2,
-          "type": "string",
-          "default": "contextBundle",
-          "enum": [
-            "contextBundle",
-            "attachmentFile",
-            "editorSelection"
-          ],
-          "enumDescriptions": [
-            "Recommended mode: attach a structured Markdown context bundle with the related terminal command, the selected text, the exact source line range, deduplicated nearby context, and a path to the immutable terminal snapshot file for this selection.",
-            "Current mode: the editor stays closed and Codex receives a separate attachment file with the selected terminal context.",
-            "Legacy mode: the extension opens the snapshot .txt, selects the needed lines there, and sends them as an editor selection like a normal editor selection."
-          ],
-          "description": "Choose how terminal context is sent to Codex."
-        },
-        "codexTerminalRecorder.selectionTrackingStrategy": {
-          "order": 3,
-          "type": "string",
-          "default": "terminalSelectionTextSearch",
-          "enum": [
-            "terminalSelectionTextSearch",
-            "indexedTerminalSelectionSearch",
-            "clipboardTextSearch"
-          ],
-          "enumDescriptions": [
-            "Read the current terminal selection from the proposed VS Code terminal API and find its last occurrence in the plain-text terminal log.",
-            "Read the current terminal selection from the proposed VS Code terminal API and resolve its location using the plain-text log plus a sidecar line index file.",
-            "Read copied text from the clipboard and find its last occurrence in the plain-text terminal log. Useful when terminal selection access is unavailable or unreliable."
-          ],
-          "description": "Choose how terminal selection text is captured and mapped back to the terminal log files."
-        },
-        "codexTerminalRecorder.selectionContextLines": {
-          "order": 4,
-          "type": "number",
-          "default": 3,
-          "minimum": 0,
-          "maximum": 50,
-          "description": "Number of surrounding lines to include around the resolved terminal selection when preparing context for Codex."
-        },
-        "codexTerminalRecorder.showNativeTerminalSelectionPopup": {
-          "order": 5,
-          "type": "boolean",
-          "default": true,
-          "description": "Show a native platform popup action near the cursor when terminal text selection becomes available."
-        },
-        "codexTerminalRecorder.showNativeEditorSelectionPopup": {
-          "order": 6,
-          "type": "boolean",
-          "default": true,
-          "description": "Show a native platform popup action near the cursor when editor text selection becomes available."
-        },
-        "codexTerminalRecorder.showCodexSelectionButton": {
-          "order": 7,
-          "type": "boolean",
-          "default": false,
-          "description": "Show a fallback status bar button for sending the active terminal selection to Codex Chat."
-        },
-        "codexTerminalRecorder.showCodexEditorSelectionButton": {
-          "order": 8,
-          "type": "boolean",
-          "default": false,
-          "description": "Show a fallback status bar button for sending the active editor selection to Codex Chat."
-        },
-        "codexTerminalRecorder.maxFileSizeMb": {
-          "order": 9,
-          "type": "number",
-          "default": 1,
-          "minimum": 0.1,
-          "maximum": 100,
-          "description": "Maximum size in megabytes to keep per terminal recording file."
-        },
-        "codexTerminalRecorder.logDirectory": {
-          "order": 10,
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Directory where terminal recording files are stored. Leave empty to use the extension storage directory outside the workspace (recommended). Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
-        },
-        "codexTerminalRecorder.diagnosticsLoggingEnabled": {
-          "order": 11,
-          "type": "boolean",
-          "default": false,
-          "description": "Enable diagnostic logging for extension internals."
-        },
-        "codexTerminalRecorder.diagnosticsLogFileEnabled": {
-          "order": 12,
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Write diagnostics into a local log file when diagnostics logging is enabled. [Open diagnostics log](command:codexTerminalRecorder.openDiagnosticsLog)"
+    "configuration": [
+      {
+        "title": "Send to Codex",
+        "properties": {
+          "codexTerminalRecorder.enabled": {
+            "order": 1,
+            "type": "boolean",
+            "default": true,
+            "description": "Enable rolling terminal log capture."
+          },
+          "codexTerminalRecorder.terminalContextSendMode": {
+            "order": 2,
+            "type": "string",
+            "default": "contextBundle",
+            "enum": [
+              "contextBundle",
+              "attachmentFile",
+              "editorSelection"
+            ],
+            "enumDescriptions": [
+              "Recommended mode: attach a structured Markdown context bundle with the related terminal command, the selected text, the exact source line range, deduplicated nearby context, and a path to the immutable terminal snapshot file for this selection.",
+              "Current mode: the editor stays closed and Codex receives a separate attachment file with the selected terminal context.",
+              "Legacy mode: the extension opens the snapshot .txt, selects the needed lines there, and sends them as an editor selection like a normal editor selection."
+            ],
+            "description": "Choose how terminal context is sent to Codex."
+          },
+          "codexTerminalRecorder.selectionTrackingStrategy": {
+            "order": 3,
+            "type": "string",
+            "default": "terminalSelectionTextSearch",
+            "enum": [
+              "terminalSelectionTextSearch",
+              "indexedTerminalSelectionSearch",
+              "clipboardTextSearch"
+            ],
+            "enumDescriptions": [
+              "Read the current terminal selection from the proposed VS Code terminal API and find its last occurrence in the plain-text terminal log.",
+              "Read the current terminal selection from the proposed VS Code terminal API and resolve its location using the plain-text log plus a sidecar line index file.",
+              "Read copied text from the clipboard and find its last occurrence in the plain-text terminal log. Useful when terminal selection access is unavailable or unreliable."
+            ],
+            "description": "Choose how terminal selection text is captured and mapped back to the terminal log files."
+          },
+          "codexTerminalRecorder.selectionContextLines": {
+            "order": 4,
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 50,
+            "description": "Number of surrounding lines to include around the resolved terminal selection when preparing context for Codex."
+          },
+          "codexTerminalRecorder.showNativeTerminalSelectionPopup": {
+            "order": 5,
+            "type": "boolean",
+            "default": true,
+            "description": "Show a native platform popup action near the cursor when terminal text selection becomes available."
+          },
+          "codexTerminalRecorder.showNativeEditorSelectionPopup": {
+            "order": 6,
+            "type": "boolean",
+            "default": true,
+            "description": "Show a native platform popup action near the cursor when editor text selection becomes available."
+          },
+          "codexTerminalRecorder.showCodexSelectionButton": {
+            "order": 7,
+            "type": "boolean",
+            "default": false,
+            "description": "Show a fallback status bar button for sending the active terminal selection to Codex Chat."
+          },
+          "codexTerminalRecorder.showCodexEditorSelectionButton": {
+            "order": 8,
+            "type": "boolean",
+            "default": false,
+            "description": "Show a fallback status bar button for sending the active editor selection to Codex Chat."
+          },
+          "codexTerminalRecorder.maxFileSizeMb": {
+            "order": 9,
+            "type": "number",
+            "default": 1,
+            "minimum": 0.1,
+            "maximum": 100,
+            "description": "Maximum size in megabytes to keep per terminal recording file."
+          },
+          "codexTerminalRecorder.logDirectory": {
+            "order": 10,
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Directory where terminal recording files are stored. Leave empty to use the extension storage directory outside the workspace (recommended). Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
+          },
+          "codexTerminalRecorder.diagnosticsLoggingEnabled": {
+            "order": 11,
+            "type": "boolean",
+            "default": false,
+            "description": "Enable diagnostic logging for extension internals."
+          },
+          "codexTerminalRecorder.diagnosticsLogFileEnabled": {
+            "order": 12,
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Write diagnostics into a local log file when diagnostics logging is enabled. [Open diagnostics log](command:codexTerminalRecorder.openDiagnosticsLog)"
+          }
+        }
+      },
+      {
+        "title": "Codex Switch",
+        "properties": {
+          "codexSwitch.debugLogging": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable additional diagnostic logging for account switching and profile sync."
+          },
+          "codexSwitch.activeProfileScope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "workspace"
+            ],
+            "default": "global",
+            "description": "Choose whether the active profile is shared across every workspace or stored per workspace."
+          },
+          "codexSwitch.storageMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "secretStorage",
+              "remoteFiles"
+            ],
+            "default": "auto",
+            "description": "Choose where saved profile tokens are stored."
+          },
+          "codexSwitch.reloadWindowAfterProfileSwitch": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reload the VS Code window immediately after switching the active Codex profile. This is the most reliable way to restart the official Codex extension with the selected auth.json."
+          },
+          "codexSwitch.statusBarClickBehavior": {
+            "type": "string",
+            "enum": [
+              "cycle",
+              "toggleLast"
+            ],
+            "default": "cycle",
+            "description": "Choose whether clicking the Codex profile status bar item cycles profiles or toggles back to the previous one.",
+            "enumDescriptions": [
+              "Cycle through all saved profiles.",
+              "Toggle between the active profile and the previous profile."
+            ]
+          }
+        }
+      },
+      {
+        "title": "Codex Rate Limit",
+        "properties": {
+          "codexRatelimit.enableLogging": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable detailed rate-limit logging for debugging purposes.",
+            "scope": "window"
+          },
+          "codexRatelimit.showOutputOnError": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reserved for compatibility with the original Codex rate-limit tracker settings.",
+            "scope": "window"
+          },
+          "codexRatelimit.preferUsageApi": {
+            "type": "boolean",
+            "default": true,
+            "description": "Query the Codex usage API for the active profile before falling back to local session files.",
+            "scope": "window"
+          },
+          "codexRatelimit.color.enable": {
+            "type": "boolean",
+            "default": true,
+            "description": "Color the combined Codex profile status based on current rate-limit pressure.",
+            "scope": "window"
+          },
+          "codexRatelimit.color.criticalColor": {
+            "type": "string",
+            "default": "#eca7a7",
+            "description": "Color used when the current profile is cooling down or has crossed the critical usage threshold.",
+            "scope": "window"
+          },
+          "codexRatelimit.color.criticalThreshold": {
+            "type": "number",
+            "default": 90,
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Usage percentage threshold for the critical state.",
+            "scope": "window"
+          },
+          "codexRatelimit.color.warningColor": {
+            "type": "string",
+            "default": "#f3d898",
+            "description": "Color used when the current profile crosses the warning usage threshold.",
+            "scope": "window"
+          },
+          "codexRatelimit.color.warningThreshold": {
+            "type": "number",
+            "default": 70,
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Usage percentage threshold for the warning state.",
+            "scope": "window"
+          },
+          "codexRatelimit.sessionPath": {
+            "type": "string",
+            "default": "",
+            "description": "Custom path to Codex sessions (leave empty to use ~/.codex/sessions).",
+            "scope": "window"
+          },
+          "codexRatelimit.refreshInterval": {
+            "type": "number",
+            "default": 10,
+            "minimum": 5,
+            "maximum": 3600,
+            "description": "How often the per-profile rate-limit monitor refreshes, in seconds.",
+            "scope": "window"
+          }
         }
       }
-    }
+    ]
   }
 }

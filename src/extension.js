@@ -16,8 +16,12 @@ const { EditorSelectionCodexSender } = require('./codex/EditorSelectionCodexSend
 const { ExplorerResourcesCodexSender } = require('./codex/ExplorerResourcesCodexSender');
 const { TerminalSelectionCodexSender } = require('./codex/TerminalSelectionCodexSender');
 const { createSelectionPopupPresenter } = require('./native/presenter');
+const { registerProfileCommands } = require('./profiles/commands');
+const { ProfileManager } = require('./profiles/profileManager');
+const { RateLimitMonitor } = require('./profiles/rateLimitMonitor');
 const { NativeSelectionOverlayController } = require('./ui/NativeSelectionOverlayController');
 const { EditorSelectionStatusBarController } = require('./ui/EditorSelectionStatusBarController');
+const { ProfileStatusBarController } = require('./profiles/statusBar');
 const { RecorderSettingsStatusBarController } = require('./ui/RecorderSettingsStatusBarController');
 const { SelectionPopupSuppression } = require('./ui/SelectionPopupSuppression');
 const { TerminalSelectionStatusBarController } = require('./ui/TerminalSelectionStatusBarController');
@@ -35,6 +39,12 @@ function activate(context) {
 
   const manager = new TerminalLogManager(context, output, logger);
   context.subscriptions.push(manager);
+  const profileManager = new ProfileManager(context, logger);
+  const profileStatusBarController = new ProfileStatusBarController();
+  const rateLimitMonitor = new RateLimitMonitor(profileManager, logger);
+  context.subscriptions.push(profileManager);
+  context.subscriptions.push(profileStatusBarController);
+  context.subscriptions.push(rateLimitMonitor);
   const popupSuppression = new SelectionPopupSuppression(logger);
   const selectionResolver = new ActiveTerminalSelectionResolver(manager);
   const selectionLocator = new SelectionLocator(selectionResolver, output, popupSuppression);
@@ -81,11 +91,140 @@ function activate(context) {
   context.subscriptions.push(recorderSettingsStatusBarController);
   context.subscriptions.push(statusBarController);
 
+  let latestProfileUiRefreshId = 0;
+  let lastUnmanagedAuthNoticeKey;
+  let unmanagedAuthNoticeInFlight = false;
+
+  const getCurrentAuthNoticeKey = (authData) => {
+    if (!authData) {
+      return 'current-auth';
+    }
+
+    const identityParts = [
+      authData.accountId,
+      authData.defaultOrganizationId,
+      authData.chatgptUserId,
+      authData.userId,
+      authData.subject,
+      authData.email
+    ]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+
+    return identityParts.length ? identityParts.join('|') : 'current-auth';
+  };
+
+  const maybeNotifyUnmanagedCurrentProfile = async () => {
+    let shouldRecheckAfterNotice = false;
+    if (unmanagedAuthNoticeInFlight) {
+      return;
+    }
+
+    try {
+      const currentAuthMatch = await profileManager.getCurrentAuthProfileMatch();
+      if (!currentAuthMatch.hasAuth) {
+        lastUnmanagedAuthNoticeKey = undefined;
+        return;
+      }
+
+      if (currentAuthMatch.profileId) {
+        lastUnmanagedAuthNoticeKey = undefined;
+        return;
+      }
+
+      const authData = await profileManager.loadCurrentAuthData();
+      const noticeKey = getCurrentAuthNoticeKey(authData);
+      if (noticeKey === lastUnmanagedAuthNoticeKey) {
+        return;
+      }
+
+      lastUnmanagedAuthNoticeKey = noticeKey;
+      unmanagedAuthNoticeInFlight = true;
+      shouldRecheckAfterNotice = true;
+
+      const addLabel = 'Add current profile';
+      const manageLabel = 'Manage profiles';
+      const email =
+        authData && typeof authData.email === 'string' && authData.email !== 'Unknown'
+          ? authData.email.trim().replace(/\s+/g, ' ')
+          : '';
+      const accountLabel =
+        email ? ` (${email})` : '';
+      const selection = await vscode.window.showInformationMessage(
+        `Current Codex account${accountLabel} is not saved in Codex Switch.`,
+        addLabel,
+        manageLabel
+      );
+
+      if (selection === addLabel) {
+        await vscode.commands.executeCommand('codex-switch.profile.addFromCodexAuthFile');
+      } else if (selection === manageLabel) {
+        await vscode.commands.executeCommand('codex-switch.profile.manage');
+      }
+    } catch (error) {
+      logger.error('Failed to notify about unmanaged current Codex account.', {
+        error: error && error.message ? error.message : String(error)
+      });
+    } finally {
+      unmanagedAuthNoticeInFlight = false;
+      if (shouldRecheckAfterNotice) {
+        void maybeNotifyUnmanagedCurrentProfile();
+      }
+    }
+  };
+
+  const refreshProfileUi = async () => {
+    const refreshId = ++latestProfileUiRefreshId;
+
+    try {
+      const profiles = await profileManager.listProfiles();
+      const activeProfileId = await profileManager.getActiveProfileId();
+      if (refreshId !== latestProfileUiRefreshId) {
+        return;
+      }
+
+      if (!activeProfileId) {
+        profileStatusBarController.update(null, profiles);
+        void maybeNotifyUnmanagedCurrentProfile();
+        return;
+      }
+
+      const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+      if (refreshId !== latestProfileUiRefreshId) {
+        return;
+      }
+
+      if (!activeProfile) {
+        await profileManager.setActiveProfileId(undefined);
+        return;
+      }
+
+      profileStatusBarController.update(activeProfile, profiles);
+    } catch (error) {
+      logger.error('Failed to refresh the Codex profile status UI.', {
+        error: error && error.message ? error.message : String(error)
+      });
+      profileStatusBarController.update(null, []);
+    }
+  };
+
+  registerProfileCommands(context, profileManager, rateLimitMonitor, refreshProfileUi);
+
   context.subscriptions.push(
     codexAvailabilityController.onDidChangeAvailability(() => {
       void editorStatusBarController.refresh();
       void recorderSettingsStatusBarController.refresh();
       void statusBarController.refresh();
+    }),
+    profileManager.onDidChange(() => {
+      void refreshProfileUi();
+    }),
+    rateLimitMonitor.onDidChange(() => {
+      void refreshProfileUi();
+    }),
+    ...profileManager.createWatchers(() => {
+      void refreshProfileUi();
+      void rateLimitMonitor.refresh(true);
     }),
     vscode.commands.registerCommand('codexTerminalRecorder.openLogDirectory', async () => {
       await manager.openLogDirectory();
@@ -191,10 +330,18 @@ function activate(context) {
         void recorderSettingsStatusBarController.refresh();
         void statusBarController.refresh();
       }
+
+      if (
+        event.affectsConfiguration('codexSwitch') ||
+        event.affectsConfiguration('codexRatelimit')
+      ) {
+        void refreshProfileUi();
+      }
     })
   );
 
   codexAvailabilityController.activate();
+  rateLimitMonitor.activate();
   nativeSelectionOverlayController.activate();
   editorStatusBarController.activate();
   recorderSettingsStatusBarController.activate();
@@ -205,6 +352,9 @@ function activate(context) {
     openAiExtensionInstalled: Boolean(vscode.extensions.getExtension('openai.chatgpt')),
     terminalWriteApiAvailable: isTerminalWriteApiAvailable()
   });
+  void refreshProfileUi();
+  void profileManager.syncActiveProfileToCodexAuthFile();
+  void rateLimitMonitor.refresh(true);
   void manager.activate();
 }
 
