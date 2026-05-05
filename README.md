@@ -126,7 +126,7 @@ When working on this repository, connect the current folder to VS Code as a deve
 - `codexTerminalRecorder.diagnosticsLogFileEnabled`: also write diagnostics to a log file on disk.
 - `codexSwitch.activeProfileScope`: keep the active Codex account global or workspace-local.
 - `codexSwitch.storageMode`: choose between SecretStorage and shared remote files for saved tokens.
-- `codexSwitch.reloadWindowAfterProfileSwitch`: optionally reload VS Code after switching accounts; the profile switcher includes a checkbox for this.
+- `codexSwitch.reloadWindowAfterProfileSwitch`: reload the current VS Code window after switching accounts by default; the profile switcher includes a checkbox for this.
 - The profile switcher also includes a checkbox for temporarily disabling Send to Codex without turning off profiles.
 - `codexSwitch.statusBarClickBehavior`: cycle through profiles or jump back to the previous one.
 - `codexRatelimit.sessionPath`: override the default `~/.codex/sessions` lookup path.

@@ -102,8 +102,31 @@ async function buildProfileQuickPickItems(profiles, activeProfileId, profileMana
 }
 
 async function buildAddCurrentProfileItem(profileManager) {
+  const windowActive = await profileManager.getWindowActiveProfileMatch();
+  if (!windowActive.hasAuth) {
+    return null;
+  }
+
   const authData = await profileManager.loadCurrentAuthData();
   if (!authData) {
+    return null;
+  }
+
+  if (windowActive.profileId) {
+    if (await profileManager.hasStoredTokens(windowActive.profileId)) {
+      return null;
+    }
+
+    const activeProfile = await profileManager.getProfile(windowActive.profileId);
+    if (activeProfile && profileManager.matchesAuth(activeProfile, authData)) {
+      return {
+        label: '$(key) Restore current profile',
+        description: activeProfile.name,
+        detail: 'Store tokens from the current ~/.codex/auth.json for this saved profile',
+        command: 'codex-switch.profile.addFromCodexAuthFile'
+      };
+    }
+
     return null;
   }
 
@@ -310,12 +333,22 @@ function registerProfileCommands(
   context,
   profileManager,
   rateLimitMonitor,
-  refreshProfileUi
+  refreshProfileUi,
+  options = {}
 ) {
+  const markWindowAuthChangeExpected =
+    options && typeof options.markWindowAuthChangeExpected === 'function'
+      ? options.markWindowAuthChangeExpected
+      : () => {};
+  const onProfileSwitchCommitted =
+    options && typeof options.onProfileSwitchCommitted === 'function'
+      ? options.onProfileSwitchCommitted
+      : async () => {};
+
   const getReloadWindowAfterProfileSwitch = () => Boolean(
     vscode.workspace
       .getConfiguration('codexSwitch')
-      .get('reloadWindowAfterProfileSwitch', false)
+      .get('reloadWindowAfterProfileSwitch', true)
   );
 
   const getSendToCodexEnabled = () => Boolean(
@@ -396,6 +429,11 @@ function registerProfileCommands(
       return false;
     }
 
+    await onProfileSwitchCommitted(profileId, {
+      changedProfile,
+      willReloadWindow:
+        reloadWindowOnSwitch && changedProfile && getReloadWindowAfterProfileSwitch()
+    });
     await afterProfileSwitch({
       reloadWindow: reloadWindowOnSwitch && changedProfile
     });
@@ -407,6 +445,7 @@ function registerProfileCommands(
   const getReauthCommandText = () => `${getLogoutCommandText()}\n${getLoginCommandText()}`;
 
   const openTerminalAndRun = async (sequence) => {
+    markWindowAuthChangeExpected();
     await vscode.commands.executeCommand('workbench.action.terminal.new');
     setTimeout(() => {
       void vscode.commands.executeCommand('workbench.action.terminal.sendSequence', {
@@ -706,6 +745,17 @@ function registerProfileCommands(
           `Could not read auth from ${authPath}. Run "${loginCommandText}" first.`
         );
         return;
+      }
+
+      const windowActive = await profileManager.getWindowActiveProfileMatch();
+      if (windowActive.profileId) {
+        const activeProfile = await profileManager.getProfile(windowActive.profileId);
+        if (activeProfile && !profileManager.matchesAuth(activeProfile, authData)) {
+          void vscode.window.showInformationMessage(
+            `This window is still using "${activeProfile.name}". Switch or reload this window before importing the current auth.json.`
+          );
+          return;
+        }
       }
 
       const existing = await profileManager.findDuplicateProfile(authData);

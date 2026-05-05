@@ -28,6 +28,8 @@ const { ProfileStatusBarController } = require('./profiles/statusBar');
 const { SelectionPopupSuppression } = require('./ui/SelectionPopupSuppression');
 const { TerminalSelectionStatusBarController } = require('./ui/TerminalSelectionStatusBarController');
 
+const CODEX_POST_SWITCH_WARMUP_KEY = 'codexSwitch.pendingCodexPostSwitchWarmup';
+
 function activate(context) {
   const output = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   context.subscriptions.push(output);
@@ -90,6 +92,76 @@ function activate(context) {
   let latestProfileUiRefreshId = 0;
   let lastUnmanagedAuthNoticeKey;
   let unmanagedAuthNoticeInFlight = false;
+  let acceptWindowAuthChangesUntil = 0;
+
+  const markWindowAuthChangeExpected = () => {
+    acceptWindowAuthChangesUntil = Math.max(
+      acceptWindowAuthChangesUntil,
+      Date.now() + 10 * 60 * 1000
+    );
+  };
+
+  const shouldAcceptAuthChangeForThisWindow = () => {
+    if (vscode.window.state && vscode.window.state.focused) {
+      return true;
+    }
+    return acceptWindowAuthChangesUntil > Date.now();
+  };
+
+  const warmUpCodexAfterProfileSwitch = async (reason) => {
+    const codexExtension = vscode.extensions.getExtension('openai.chatgpt');
+    if (!codexExtension) {
+      return;
+    }
+
+    try {
+      if (!codexExtension.isActive) {
+        await codexExtension.activate();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await vscode.commands.executeCommand('chatgpt.openSidebar');
+      logger.info('Warmed up Codex after profile switch.', { reason });
+    } catch (error) {
+      logger.warn('Failed to warm up Codex after profile switch.', {
+        reason,
+        error: error && error.message ? error.message : String(error)
+      });
+    }
+  };
+
+  const scheduleCodexPostSwitchWarmup = async (profileId, options = {}) => {
+    if (!profileId || !options.changedProfile) {
+      return;
+    }
+
+    if (options.willReloadWindow) {
+      await context.workspaceState.update(CODEX_POST_SWITCH_WARMUP_KEY, {
+        profileId,
+        scheduledAt: Date.now()
+      });
+      return;
+    }
+
+    setTimeout(() => {
+      void warmUpCodexAfterProfileSwitch('profile-switch-no-reload');
+    }, 1200);
+  };
+
+  const runPendingCodexPostSwitchWarmup = async () => {
+    const pending = context.workspaceState.get(CODEX_POST_SWITCH_WARMUP_KEY);
+    if (!pending || !pending.scheduledAt) {
+      return;
+    }
+
+    await context.workspaceState.update(CODEX_POST_SWITCH_WARMUP_KEY, undefined);
+    if (Date.now() - Number(pending.scheduledAt) > 2 * 60 * 1000) {
+      return;
+    }
+
+    setTimeout(() => {
+      void warmUpCodexAfterProfileSwitch('profile-switch-after-reload');
+    }, 1200);
+  };
 
   const getCurrentAuthNoticeKey = (authData) => {
     if (!authData) {
@@ -213,10 +285,15 @@ function activate(context) {
     }
   };
 
-  const handleProfileWatcherChange = async () => {
+  const handleProfileWatcherChange = async (event = {}) => {
     if (!areProfileFeaturesEnabled()) {
       await refreshProfileUi();
       return;
+    }
+
+    if (event.source === 'auth' && shouldAcceptAuthChangeForThisWindow()) {
+      acceptWindowAuthChangesUntil = 0;
+      await profileManager.initializeWindowActiveProfileFromCurrentAuth(true);
     }
 
     await profileManager.syncCurrentAuthToMatchingProfile();
@@ -224,7 +301,10 @@ function activate(context) {
     await rateLimitMonitor.refresh(true);
   };
 
-  registerProfileCommands(context, profileManager, rateLimitMonitor, refreshProfileUi);
+  registerProfileCommands(context, profileManager, rateLimitMonitor, refreshProfileUi, {
+    markWindowAuthChangeExpected,
+    onProfileSwitchCommitted: scheduleCodexPostSwitchWarmup
+  });
 
   const ensureSendToCodexEnabled = async () => {
     if (isSendToCodexEnabled()) {
@@ -258,8 +338,8 @@ function activate(context) {
     rateLimitMonitor.onDidChange(() => {
       void refreshProfileUi();
     }),
-    ...profileManager.createWatchers(() => {
-      void handleProfileWatcherChange();
+    ...profileManager.createWatchers((event) => {
+      void handleProfileWatcherChange(event);
     }),
     vscode.commands.registerCommand('codexTerminalRecorder.openLogDirectory', async () => {
       await manager.openLogDirectory();
@@ -406,6 +486,7 @@ function activate(context) {
     terminalWriteApiAvailable: isTerminalWriteApiAvailable()
   });
   void refreshProfileUi();
+  void runPendingCodexPostSwitchWarmup();
   if (areProfileFeaturesEnabled()) {
     void (async () => {
       await profileManager.syncCurrentAuthToMatchingProfile();

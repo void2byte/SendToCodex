@@ -78,7 +78,7 @@ function createProfileTooltip(activeProfile, profiles) {
 function formatReloadWarning() {
   const reloadAfterSwitch = vscode.workspace
     .getConfiguration('codexSwitch')
-    .get('reloadWindowAfterProfileSwitch', false);
+    .get('reloadWindowAfterProfileSwitch', true);
 
   return reloadAfterSwitch
     ? '$(warning) VS Code window will reload after switching accounts.\n'

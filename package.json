@@ -2,7 +2,7 @@
   "name": "codex-terminal-recorder",
   "displayName": "Codex Multitool",
   "description": "Three-in-one VS Code extension for Send to Codex, Codex account switching, and per-profile rate-limit tracking.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "screph",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -355,7 +355,7 @@
           },
           "codexSwitch.reloadWindowAfterProfileSwitch": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "Reload the VS Code window immediately after switching the active Codex profile. This is the most reliable way to restart the official Codex extension with the selected auth.json."
           },
           "codexSwitch.statusBarClickBehavior": {

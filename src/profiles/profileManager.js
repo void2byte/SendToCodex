@@ -1328,9 +1328,9 @@ class ProfileManager {
 
   createWatchers(onChanged) {
     const disposables = [];
-    const fire = () => {
+    const fire = (source) => {
       try {
-        onChanged();
+        onChanged({ source });
       } catch {
         // Ignore watcher refresh errors.
       }
@@ -1341,9 +1341,9 @@ class ProfileManager {
       const authWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(authDirectory), 'auth.json')
       );
-      authWatcher.onDidCreate(fire);
-      authWatcher.onDidChange(fire);
-      authWatcher.onDidDelete(fire);
+      authWatcher.onDidCreate(() => fire('auth'));
+      authWatcher.onDidChange(() => fire('auth'));
+      authWatcher.onDidDelete(() => fire('auth'));
       disposables.push(authWatcher);
     }
 
@@ -1351,9 +1351,9 @@ class ProfileManager {
       const profilesWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(getSharedStoreRoot()), PROFILES_FILENAME)
       );
-      profilesWatcher.onDidCreate(fire);
-      profilesWatcher.onDidChange(fire);
-      profilesWatcher.onDidDelete(fire);
+      profilesWatcher.onDidCreate(() => fire('profiles'));
+      profilesWatcher.onDidChange(() => fire('profiles'));
+      profilesWatcher.onDidDelete(() => fire('profiles'));
       disposables.push(profilesWatcher);
 
       const activeWatcher = vscode.workspace.createFileSystemWatcher(
@@ -1362,17 +1362,17 @@ class ProfileManager {
           SHARED_ACTIVE_PROFILE_FILENAME
         )
       );
-      activeWatcher.onDidCreate(fire);
-      activeWatcher.onDidChange(fire);
-      activeWatcher.onDidDelete(fire);
+      activeWatcher.onDidCreate(() => fire('active'));
+      activeWatcher.onDidChange(() => fire('active'));
+      activeWatcher.onDidDelete(() => fire('active'));
       disposables.push(activeWatcher);
 
       const tokenWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(getSharedProfilesDir()), '*.json')
       );
-      tokenWatcher.onDidCreate(fire);
-      tokenWatcher.onDidChange(fire);
-      tokenWatcher.onDidDelete(fire);
+      tokenWatcher.onDidCreate(() => fire('tokens'));
+      tokenWatcher.onDidChange(() => fire('tokens'));
+      tokenWatcher.onDidDelete(() => fire('tokens'));
       disposables.push(tokenWatcher);
     }
 
