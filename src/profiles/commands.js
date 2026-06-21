@@ -39,95 +39,6 @@ const {
 const ENCRYPTED_EXPORT_FORMAT = 'codex-switch-profile-export-encrypted';
 const EXPORT_ENCRYPTION_VERSION = 1;
 const EXPORT_KEY_ITERATIONS = 210000;
-const ISOLATED_LOGIN_PREFIX = 'codex-multitool-login-';
-const ISOLATED_LOGIN_BROWSER_PROFILE_DIRECTORY = 'browser-profile';
-const ISOLATED_LOGIN_BROWSER_LAUNCHER = 'codex-browser-launcher.cmd';
-const ISOLATED_LOGIN_WSL_BROWSER_LAUNCHER = 'codex-browser-launcher.sh';
-
-function quoteCmdValue(value) {
-  return `"${String(value).replace(/"/g, '""')}"`;
-}
-
-function getWindowsBrowserCandidates(env = process.env) {
-  const candidates = [];
-  const localAppData = env.LOCALAPPDATA || '';
-  const programFiles = env.ProgramFiles || '';
-  const programFilesX86 = env['ProgramFiles(x86)'] || '';
-
-  if (localAppData) {
-    candidates.push(path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-    candidates.push(path.join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-  }
-  if (programFiles) {
-    candidates.push(path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-    candidates.push(path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-  }
-  if (programFilesX86) {
-    candidates.push(path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-    candidates.push(path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-  }
-
-  return candidates;
-}
-
-function findWindowsBrowserExecutable(env = process.env) {
-  return getWindowsBrowserCandidates(env).find((candidate) => {
-    try {
-      return fs.existsSync(candidate);
-    } catch {
-      return false;
-    }
-  });
-}
-
-function createWindowsBrowserLauncher(directory, options = {}) {
-  const browserExecutable = options.browserExecutable || findWindowsBrowserExecutable();
-  if (!browserExecutable) {
-    throw new Error(
-      'Could not find Chrome or Edge for isolated Codex login. Install Chrome/Edge or import the new account from an auth.json file.'
-    );
-  }
-
-  fs.mkdirSync(directory, { recursive: true });
-  const userDataDir = path.join(directory, ISOLATED_LOGIN_BROWSER_PROFILE_DIRECTORY);
-  fs.mkdirSync(userDataDir, { recursive: true });
-  const launcherPath = path.join(directory, ISOLATED_LOGIN_BROWSER_LAUNCHER);
-  const script = [
-    '@echo off',
-    'setlocal',
-    'set "CODEX_LOGIN_URL=%~1"',
-    'if "%CODEX_LOGIN_URL%"=="" exit /b 2',
-    `start "" ${quoteCmdValue(browserExecutable)} --user-data-dir=${quoteCmdValue(userDataDir)} --no-first-run --no-default-browser-check --new-window "%CODEX_LOGIN_URL%"`,
-    'exit /b 0',
-    ''
-  ].join('\r\n');
-  fs.writeFileSync(launcherPath, script, 'utf8');
-
-  return {
-    browserExecutable,
-    launcherPath,
-    userDataDir
-  };
-}
-
-function tryCreateWindowsBrowserLauncher(directory, logger) {
-  try {
-    return createWindowsBrowserLauncher(directory);
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    if (logger && logger.warn) {
-      logger.warn('Could not create isolated browser launcher for Codex login.', {
-        error: message
-      });
-    }
-    if (vscode.window && vscode.window.showWarningMessage) {
-      void vscode.window.showWarningMessage(
-        `Codex isolated login will use the default browser because an isolated browser launcher could not be created: ${message}`
-      );
-    }
-    return null;
-  }
-}
 
 function hasRequiredStoredTokens(tokens) {
   if (!tokens || typeof tokens !== 'object') {
@@ -809,12 +720,7 @@ function registerProfileCommands(
   const getReauthCommandText = () => `${getLogoutCommandText()}\n${getLoginCommandText()}`;
 
   const saveAuthDataAsProfile = async (authData, options = {}) => {
-    const {
-      activate = true,
-      reloadWindowOnSwitch = true,
-      forceReloadWindow = false,
-      showSavedMessage = false
-    } = options;
+    const { activate = true, reloadWindowOnSwitch = true, forceReloadWindow = false } = options;
     const existing = await profileManager.findDuplicateProfile(authData);
     if (existing) {
       const existingHasTokens = await profileManager.hasStoredTokens(existing.id);
@@ -825,10 +731,6 @@ function registerProfileCommands(
             reloadWindowOnSwitch,
             forceReloadWindow: true
           });
-        } else if (showSavedMessage) {
-          void vscode.window.showInformationMessage(
-            `Saved Codex profile "${displayProfileName(existing)}". Current Codex account was not changed.`
-          );
         }
         return existing;
       }
@@ -849,10 +751,6 @@ function registerProfileCommands(
           reloadWindowOnSwitch,
           forceReloadWindow: true
         });
-      } else if (showSavedMessage) {
-        void vscode.window.showInformationMessage(
-          `Updated Codex profile "${displayProfileName(existing)}". Current Codex account was not changed.`
-        );
       }
       return existing;
     }
@@ -863,10 +761,6 @@ function registerProfileCommands(
         reloadWindowOnSwitch,
         forceReloadWindow
       });
-    } else if (showSavedMessage) {
-      void vscode.window.showInformationMessage(
-        `Added Codex profile "${displayProfileName(profile)}". Current Codex account was not changed.`
-      );
     }
     return profile;
   };
@@ -902,35 +796,11 @@ function registerProfileCommands(
           { encoding: 'utf8', windowsHide: true }
         )
       ).trim();
-      const browserLauncher = tryCreateWindowsBrowserLauncher(windowsHome, profileManager.logger);
-      const linuxBrowserLauncher = `${linuxHome}/${ISOLATED_LOGIN_WSL_BROWSER_LAUNCHER}`;
-      if (browserLauncher) {
-        const browserLauncherScript = [
-          '#!/bin/sh',
-          'set -eu',
-          'if [ "$#" -lt 1 ]; then exit 2; fi',
-          `cmd.exe /c ${quoteShellSingle(browserLauncher.launcherPath)} "$1" >/dev/null 2>&1 &`,
-          ''
-        ].join('\n');
-        fs.writeFileSync(
-          path.join(windowsHome, ISOLATED_LOGIN_WSL_BROWSER_LAUNCHER),
-          browserLauncherScript,
-          'utf8'
-        );
-        execFileSync(
-          'wsl.exe',
-          ['sh', '-lc', `chmod +x ${quoteShellSingle(linuxBrowserLauncher)}`],
-          { windowsHide: true }
-        );
-      }
       return {
         authPath: path.join(windowsHome, 'auth.json'),
         terminalName: 'Codex Login: isolated WSL profile',
         terminalEnv: undefined,
-        terminalText: browserLauncher
-          ? `wsl sh -lc "CODEX_HOME=${quoteShellSingle(linuxHome)} BROWSER=${quoteShellSingle(linuxBrowserLauncher)} codex login"`
-          : `wsl sh -lc "CODEX_HOME=${quoteShellSingle(linuxHome)} codex login"`,
-        browserLauncher,
+        terminalText: `wsl sh -lc "CODEX_HOME=${quoteShellSingle(linuxHome)} codex login"`,
         cleanup: () => {
           execFileSync(
             'wsl.exe',
@@ -942,17 +812,11 @@ function registerProfileCommands(
     }
 
     const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-multitool-login-'));
-    const browserLauncher = tryCreateWindowsBrowserLauncher(isolatedHome, profileManager.logger);
-    const terminalEnv = { CODEX_HOME: isolatedHome };
-    if (browserLauncher) {
-      terminalEnv.BROWSER = browserLauncher.launcherPath;
-    }
     return {
       authPath: path.join(isolatedHome, 'auth.json'),
       terminalName: 'Codex Login: isolated profile',
-      terminalEnv,
+      terminalEnv: { CODEX_HOME: isolatedHome },
       terminalText: 'codex login',
-      browserLauncher,
       cleanup: () => {
         const resolved = path.resolve(isolatedHome);
         const tmpRoot = path.resolve(os.tmpdir());
@@ -1048,19 +912,8 @@ function registerProfileCommands(
     });
     terminal.show();
     terminal.sendText(isolated.terminalText);
-    if (profileManager.logger && profileManager.logger.info) {
-      profileManager.logger.info('Started isolated Codex login flow.', {
-        authPath: isolated.authPath,
-        browserLauncherPath: isolated.browserLauncher
-          ? isolated.browserLauncher.launcherPath
-          : null,
-        browserUserDataDir: isolated.browserLauncher
-          ? isolated.browserLauncher.userDataDir
-          : null
-      });
-    }
     void vscode.window.showInformationMessage(
-      'Complete the Codex login flow in the isolated browser window. This does not run Codex logout and does not overwrite the current auth.json until the profile is saved.'
+      'Complete the Codex login flow. This login is isolated and will not overwrite the current auth.json until the profile is saved.'
     );
 
     const authData = await waitForAuthDataFile(isolated.authPath, 10 * 60 * 1000);
@@ -1073,12 +926,7 @@ function registerProfileCommands(
     }
 
     cleanupIsolatedHome('warning');
-    const profile = await saveAuthDataAsProfile(authData, {
-      activate: false,
-      reloadWindowOnSwitch: false,
-      forceReloadWindow: false,
-      showSavedMessage: true
-    });
+    const profile = await saveAuthDataAsProfile(authData, { activate: true });
     if (!profile) {
       return;
     }
@@ -1854,8 +1702,8 @@ function registerProfileCommands(
       const action = await vscode.window.showQuickPick(
         [
           {
-            label: 'Add account via isolated Codex login...',
-            detail: 'Sign in with temporary CODEX_HOME and isolated browser profile; does not run codex logout.',
+            label: 'Login via Codex CLI (isolated)...',
+            detail: 'Sign in with a temporary CODEX_HOME, then save the new auth.json as a profile.',
             command: 'codex-switch.profile.login'
           },
           ...(hasProfiles
@@ -2029,8 +1877,5 @@ function registerProfileCommands(
 }
 
 module.exports = {
-  createWindowsBrowserLauncher,
-  findWindowsBrowserExecutable,
-  getWindowsBrowserCandidates,
   registerProfileCommands
 };

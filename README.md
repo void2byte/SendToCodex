@@ -29,7 +29,6 @@ GitHub project: https://github.com/void2byte/SendToCodex
 - Shows a native platform popup near terminal and editor selections on Windows, macOS, and Linux, with optional status bar fallback buttons.
 - Can write a diagnostics log for troubleshooting activation, selection detection, and Codex integration.
 - Saves multiple Codex auth profiles and switches the active `auth.json` from inside VS Code.
-- Adds a new Codex account through an isolated login flow: temporary `CODEX_HOME` plus a separate Chrome/Edge browser profile, without running `codex logout` against the currently active account.
 - Tracks Codex session rate-limit windows per saved profile and shows cooldown time remaining for each account.
 
 ## Codex profiles and limits
