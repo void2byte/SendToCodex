@@ -1,5 +1,10 @@
 'use strict';
 
+const {
+  compareDisplayText,
+  formatLocalDateTime
+} = require('../ui/userFormatting');
+
 function normalizeTimestamp(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -153,10 +158,15 @@ function getActiveLimitState(windowState, now) {
   }
 
   const resetAt = normalizeTimestamp(windowState.resetAt);
+  const usedPercent = Math.max(
+    0,
+    Math.min(100, normalizeNumber(windowState.usedPercent, 0))
+  );
   return {
-    usedPercent: Math.max(0, Math.min(100, normalizeNumber(windowState.usedPercent, 0))),
+    usedPercent,
     resetAt,
     active: Boolean(resetAt && resetAt > now),
+    unstarted: Boolean(!resetAt && usedPercent <= 0),
     windowMinutes: Math.max(0, Math.round(normalizeNumber(windowState.windowMinutes, 0)))
   };
 }
@@ -184,7 +194,12 @@ function isFreshUsageApiRateLimitState(rateLimitState, now = Date.now()) {
   }
 
   const observedAt = normalizeTimestamp(rateLimitState.observedAt);
-  return Boolean(observedAt && now - observedAt <= RATE_LIMIT_DISPLAY_FRESHNESS_MS);
+  const assumedResetAt = normalizeTimestamp(rateLimitState.assumedResetAt);
+  return Boolean(
+    observedAt &&
+      (!assumedResetAt || assumedResetAt < observedAt) &&
+      now - observedAt <= RATE_LIMIT_DISPLAY_FRESHNESS_MS
+  );
 }
 
 function isActiveProfileForRateDisplay(profile, options = {}) {
@@ -223,7 +238,10 @@ function getDisplayRateLimitState(profile, now = Date.now(), options = {}) {
   }
 
   if (isActiveProfileForRateDisplay(profile, options)) {
-    return isFreshUsageApiRateLimitState(rateLimitState, now) ? rateLimitState : null;
+    // A temporary API/auth failure must not erase the last known exact values. Keep older
+    // Usage API/app-server observations visible as estimates while still rejecting local
+    // session data that may belong to another account in a different VS Code window.
+    return isUsageApiRateLimitState(rateLimitState) ? rateLimitState : null;
   }
 
   return rateLimitState;
@@ -240,6 +258,7 @@ function getProfileRateStatus(profile, now = Date.now(), options = {}) {
     return {
       cooldownActive: false,
       cooldownUntil: null,
+      windowNotStarted: false,
       compactText: 'n/a',
       quickPickText: '[n/a]',
       tooltipText: 'No fresh exact rate-limit data',
@@ -257,14 +276,23 @@ function getProfileRateStatus(profile, now = Date.now(), options = {}) {
 
   const hasFreshUsageApiData = isFreshUsageApiRateLimitState(rateLimitState, now);
   const primary = applyWeeklyZeroToPrimary(rawPrimary, secondary, now);
-  const activeResetTimes = [primary, secondary]
-    .filter((windowState) => Boolean(windowState && windowState.active && windowState.resetAt))
+  const exhaustedResetTimes = [primary, secondary]
+    .filter((windowState) => {
+      return Boolean(
+        windowState &&
+        windowState.active &&
+        windowState.resetAt &&
+        windowState.usedPercent >= 100
+      );
+    })
     .map((windowState) => windowState.resetAt);
-  const storedCooldownUntil = normalizeTimestamp(profile && profile.cooldownUntil);
   const cooldownUntil =
-    [storedCooldownUntil].concat(activeResetTimes).filter((value) => Boolean(value && value > now)).sort((a, b) => b - a)[0] ||
+    exhaustedResetTimes.filter((value) => value > now).sort((a, b) => b - a)[0] ||
     null;
   const cooldownActive = Boolean(cooldownUntil && cooldownUntil > now);
+  const windowNotStarted = [primary, secondary].some(
+    (windowState) => windowState && windowState.unstarted
+  );
   const maxUsedPercent = Math.max(
     primary && primary.active ? primary.usedPercent : 0,
     secondary && secondary.active ? secondary.usedPercent : 0
@@ -273,11 +301,22 @@ function getProfileRateStatus(profile, now = Date.now(), options = {}) {
   return {
     cooldownActive,
     cooldownUntil,
-    compactText: cooldownActive ? `Reset in ${formatDuration(cooldownUntil - now)}` : 'Ready',
+    windowNotStarted,
+    compactText: cooldownActive
+      ? `Limit exhausted - resets in ${formatDuration(cooldownUntil - now)}`
+      : windowNotStarted
+        ? 'Window not started - starts on first use'
+        : 'Available',
     quickPickText: cooldownActive
-      ? `[Reset in: ${formatDuration(cooldownUntil - now)}]`
-      : '[Ready]',
-    tooltipText: cooldownActive ? `Reset in ${formatDuration(cooldownUntil - now)}` : 'Ready',
+      ? `[Limit exhausted - resets in ${formatDuration(cooldownUntil - now)}]`
+      : windowNotStarted
+        ? '[Window not started - starts on first use]'
+        : '[Available]',
+    tooltipText: cooldownActive
+      ? `Limit exhausted - resets in ${formatDuration(cooldownUntil - now)}`
+      : windowNotStarted
+        ? 'Window not started - starts on first use'
+        : 'Available',
     maxUsedPercent,
     primary,
     secondary,
@@ -342,6 +381,7 @@ function applyWeeklyZeroToPrimary(primary, secondary, now = Date.now()) {
     usedPercent: 100,
     resetAt: secondary.resetAt,
     active: Boolean(secondary.resetAt && secondary.resetAt > now),
+    unstarted: false,
     windowMinutes:
       primary && primary.windowMinutes
         ? primary.windowMinutes
@@ -370,10 +410,12 @@ function getProfileDisplaySortKey(profile, now = Date.now(), options = {}) {
 }
 
 function compareProfilesForDisplay(left, right, activeProfileId, now = Date.now(), options = {}) {
-  const leftActive = Boolean(activeProfileId && left && left.id === activeProfileId);
-  const rightActive = Boolean(activeProfileId && right && right.id === activeProfileId);
-  if (leftActive !== rightActive) {
-    return leftActive ? -1 : 1;
+  if (activeProfileId) {
+    const leftIsActive = String(left && left.id) === String(activeProfileId);
+    const rightIsActive = String(right && right.id) === String(activeProfileId);
+    if (leftIsActive !== rightIsActive) {
+      return leftIsActive ? -1 : 1;
+    }
   }
 
   const leftKey = getProfileDisplaySortKey(left, now, { ...options, activeProfileId });
@@ -388,12 +430,12 @@ function compareProfilesForDisplay(left, right, activeProfileId, now = Date.now(
     return numericSort;
   }
 
-  const planSort = leftKey.planType.localeCompare(rightKey.planType);
+  const planSort = compareDisplayText(leftKey.planType, rightKey.planType);
   if (planSort !== 0) {
     return planSort;
   }
 
-  return leftKey.name.localeCompare(rightKey.name);
+  return compareDisplayText(leftKey.name, rightKey.name);
 }
 
 function sortProfilesForDisplay(profiles, activeProfileId, now = Date.now(), options = {}) {
@@ -407,7 +449,7 @@ function formatAbsoluteTimestamp(timestamp) {
   if (!normalized) {
     return 'n/a';
   }
-  return new Date(normalized).toLocaleString();
+  return formatLocalDateTime(normalized);
 }
 
 function formatResetText(timestamp, now = Date.now()) {
@@ -421,6 +463,10 @@ function formatResetText(timestamp, now = Date.now()) {
 function formatWindowCountdown(windowState, now = Date.now()) {
   if (!windowState) {
     return 'n/a';
+  }
+
+  if (windowState.unstarted) {
+    return 'Starts on first use';
   }
 
   if (!windowState.resetAt || windowState.resetAt <= now) {
@@ -477,6 +523,7 @@ function formatCompactWindow(windowState, label, now = Date.now(), options = {})
   }
 
   const isReady = !windowState.resetAt || windowState.resetAt <= now;
+  const isUnstarted = windowState.unstarted === true;
   const percentValue =
     percentageMode === 'remaining'
       ? getWindowRemainingPercent(windowState, now, {
@@ -487,11 +534,21 @@ function formatCompactWindow(windowState, label, now = Date.now(), options = {})
         ? 0
         : Math.round(windowState.usedPercent);
   const percentText = `${percentValue}%`;
+  const percentageLabel = options.includePercentageLabel
+    ? percentageMode === 'remaining'
+      ? ' remaining'
+      : ' used'
+    : '';
   if (!includeCountdown || isReady) {
-    return `${label} ${percentText}`;
+    return isUnstarted
+      ? `${label} ${percentText}${percentageLabel} - starts on first use`
+      : `${label} ${percentText}${percentageLabel}`;
   }
 
-  return `${label} ${percentText} ${formatWindowCountdown(windowState, now)}`;
+  const countdown = formatWindowCountdown(windowState, now);
+  return options.includePercentageLabel
+    ? `${label} ${percentText}${percentageLabel} - resets in ${countdown}`
+    : `${label} ${percentText} ${countdown}`;
 }
 
 function formatCompactRateSummary(status, now = Date.now(), options = {}) {
@@ -499,6 +556,7 @@ function formatCompactRateSummary(status, now = Date.now(), options = {}) {
     return formatCompactWindow(status.secondary, 'W', now, {
       includeCountdown: options.includeSecondaryCountdown !== false,
       percentageMode: options.percentageMode,
+      includePercentageLabel: options.includePercentageLabel,
       roundLowRemainingToZero: options.roundLowWeeklyRemainingToZero === true,
       lowRemainingPercentThreshold: options.lowRemainingPercentThreshold
     });
@@ -506,7 +564,8 @@ function formatCompactRateSummary(status, now = Date.now(), options = {}) {
 
   const primaryText = formatCompactWindow(status.primary, getCompactPrimaryWindowLabel(status, now), now, {
     includeCountdown: options.includePrimaryCountdown !== false,
-    percentageMode: options.percentageMode
+    percentageMode: options.percentageMode,
+    includePercentageLabel: options.includePercentageLabel
   });
   if (shouldHideMissingSecondaryWindow(status, now)) {
     return primaryText;
@@ -515,6 +574,7 @@ function formatCompactRateSummary(status, now = Date.now(), options = {}) {
   const secondaryText = formatCompactWindow(status.secondary, 'W', now, {
     includeCountdown: options.includeSecondaryCountdown !== false,
     percentageMode: options.percentageMode,
+    includePercentageLabel: options.includePercentageLabel,
     roundLowRemainingToZero: options.roundLowWeeklyRemainingToZero === true,
     lowRemainingPercentThreshold: options.lowRemainingPercentThreshold
   });
@@ -534,6 +594,8 @@ module.exports = {
   formatWindowCountdown,
   formatWindowMinutes,
   getDisplayRateLimitState,
+  getCompactPrimaryWindowLabel,
+  getPlanSortRank,
   getProfileDisplaySortKey,
   getProfileRateStatus,
   getWindowLabel,

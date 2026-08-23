@@ -53,6 +53,23 @@ function formatStatusBarProfileName(profileOrName) {
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
+function getStatusBarColorIdentity(color) {
+  if (typeof color === 'string') {
+    return `string:${color}`;
+  }
+  if (color && typeof color.id === 'string') {
+    return `theme:${color.id}`;
+  }
+  return color;
+}
+
+function getStableTooltipValue(tooltip) {
+  return String((tooltip && tooltip.value) || '').replace(
+    /(resets in )[^\r\n<|]+/gi,
+    '$1<countdown>'
+  );
+}
+
 class ProfileStatusBarController {
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(
@@ -60,26 +77,63 @@ class ProfileStatusBarController {
       vscode.StatusBarAlignment.Right,
       100
     );
+    this.isVisible = false;
     this.update(null, []);
+  }
+
+  setVisible(visible) {
+    if (this.isVisible === visible) {
+      return;
+    }
+
+    this.isVisible = visible;
+    if (visible) {
+      this.statusBarItem.show();
+      return;
+    }
+    this.statusBarItem.hide();
+  }
+
+  updateTooltip(tooltip) {
+    if (
+      getStableTooltipValue(this.statusBarItem.tooltip) ===
+      getStableTooltipValue(tooltip)
+    ) {
+      return;
+    }
+    this.statusBarItem.tooltip = tooltip;
   }
 
   update(activeProfile, profiles, otherWindowProfileUsageByProfileId) {
     if (!areProfileFeaturesEnabled()) {
-      this.statusBarItem.hide();
+      this.setVisible(false);
       return;
     }
 
     const allProfiles = profiles || [];
     if (!activeProfile) {
-      this.statusBarItem.text = '$(account) 5H n/a | W n/a';
-      this.statusBarItem.command = 'codex-switch.profile.manage';
-      this.statusBarItem.color = new vscode.ThemeColor('statusBarItem.foreground');
-      this.statusBarItem.tooltip = createProfileTooltip(
+      const text = '$(account) Primary n/a | W n/a';
+      const command = 'codex-switch.profile.manage';
+      const color = new vscode.ThemeColor('statusBarItem.foreground');
+      const tooltip = createProfileTooltip(
         null,
         allProfiles,
         otherWindowProfileUsageByProfileId
       );
-      this.statusBarItem.show();
+      if (this.statusBarItem.text !== text) {
+        this.statusBarItem.text = text;
+      }
+      if (this.statusBarItem.command !== command) {
+        this.statusBarItem.command = command;
+      }
+      if (
+        getStatusBarColorIdentity(this.statusBarItem.color) !==
+        getStatusBarColorIdentity(color)
+      ) {
+        this.statusBarItem.color = color;
+      }
+      this.updateTooltip(tooltip);
+      this.setVisible(true);
       return;
     }
 
@@ -92,38 +146,48 @@ class ProfileStatusBarController {
     const status = getProfileRateStatus(activeProfile, now, {
       activeProfileId: activeProfile.id
     });
-    this.statusBarItem.text = `$(account) ${formatStatusBarProfileName(activeProfile)}: ${formatCompactRateSummary(status, now, {
-      includePrimaryCountdown: true,
+    const text = `$(account) ${formatStatusBarProfileName(activeProfile)}: ${formatCompactRateSummary(status, now, {
+      includePrimaryCountdown: false,
       includeSecondaryCountdown: false,
       percentageMode: 'remaining',
       roundLowWeeklyRemainingToZero: quickPickSettings.roundLowWeeklyRemainingToZero,
       lowRemainingPercentThreshold: quickPickSettings.lowWeeklyRemainingZeroThreshold
     })}`;
-    this.statusBarItem.command =
+    const command =
       allProfiles.length === 0 ? 'codex-switch.profile.manage' : 'codex-switch.profile.switch';
-    this.statusBarItem.color = getStatusBarColor(
+    const color = getStatusBarColor(
       status.maxUsedPercent,
       status.cooldownActive,
       isProfileWeeklyTokensLow(activeProfile, now, lowWeeklyOptions)
     );
-    this.statusBarItem.tooltip = createProfileTooltip(
+    const tooltip = createProfileTooltip(
       activeProfile,
       allProfiles,
       otherWindowProfileUsageByProfileId
     );
-    this.statusBarItem.show();
+
+    if (this.statusBarItem.text !== text) {
+      this.statusBarItem.text = text;
+    }
+    if (this.statusBarItem.command !== command) {
+      this.statusBarItem.command = command;
+    }
+    if (
+      getStatusBarColorIdentity(this.statusBarItem.color) !==
+      getStatusBarColorIdentity(color)
+    ) {
+      this.statusBarItem.color = color;
+    }
+    this.updateTooltip(tooltip);
+    this.setVisible(true);
   }
 
   show() {
-    if (areProfileFeaturesEnabled()) {
-      this.statusBarItem.show();
-      return;
-    }
-
-    this.statusBarItem.hide();
+    this.setVisible(areProfileFeaturesEnabled());
   }
 
   dispose() {
+    this.isVisible = false;
     this.statusBarItem.dispose();
   }
 }

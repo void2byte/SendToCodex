@@ -1,8 +1,8 @@
 {
   "name": "codex-terminal-recorder",
   "displayName": "Codex Multitool",
-  "description": "Three-in-one VS Code extension for Send to Codex, Codex account switching, and per-profile rate-limit tracking.",
-  "version": "0.0.61",
+  "description": "Manage Codex accounts, usage limits and protected notes, and send terminal or editor context to Codex from VS Code.",
+  "version": "0.0.92",
   "publisher": "screph",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -22,6 +22,14 @@
   ],
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "codex",
+    "openai",
+    "account switcher",
+    "rate limits",
+    "terminal context",
+    "totp"
   ],
   "main": "./extension.js",
   "files": [
@@ -48,7 +56,10 @@
     "onCommand:codexTerminalRecorder.addExplorerFolderToCodexChat",
     "onCommand:codexTerminalRecorder.locateActiveTerminalSelection",
     "onCommand:codexTerminalRecorder.sendActiveEditorSelectionToCodexChat",
-    "onCommand:codexTerminalRecorder.sendActiveTerminalSelectionToCodexChat"
+    "onCommand:codexTerminalRecorder.sendActiveTerminalSelectionToCodexChat",
+    "onCommand:codex-switch.profile.activateUnstartedCounters",
+    "onCommand:codex-switch.profile.activateUnstartedCountersViaCodexExtension",
+    "onCommand:codex-switch.profile.activateUnstartedCountersViaAppServer"
   ],
   "contributes": {
     "commands": [
@@ -133,6 +144,21 @@
       {
         "command": "codex-switch.profile.restoreStrategy",
         "title": "Codex Multitool: Choose Post-Switch Chat Restore Strategy"
+      },
+      {
+        "command": "codex-switch.profile.activateUnstartedCounters",
+        "title": "Codex Multitool: Activate Unused Rate-Limit Counters",
+        "icon": "$(play)"
+      },
+      {
+        "command": "codex-switch.profile.activateUnstartedCountersViaCodexExtension",
+        "title": "Codex Multitool: Activate Counters via Codex Extension",
+        "icon": "$(window)"
+      },
+      {
+        "command": "codex-switch.profile.activateUnstartedCountersViaAppServer",
+        "title": "Codex Multitool: Activate Counters via App Server",
+        "icon": "$(server-process)"
       },
       {
         "command": "codex-switch.profile.toggleLast",
@@ -234,8 +260,9 @@
           "codexTerminalRecorder.enabled": {
             "order": 2,
             "type": "boolean",
-            "default": true,
-            "description": "Enable rolling terminal log capture."
+            "default": false,
+            "scope": "machine",
+            "description": "Enable local rolling terminal log capture on this machine. Disabled by default to avoid creating terminal recording files on other installations."
           },
           "codexTerminalRecorder.terminalContextSendMode": {
             "order": 3,
@@ -321,18 +348,21 @@
             "order": 12,
             "type": "string",
             "default": "",
+            "scope": "machine",
             "markdownDescription": "Directory where terminal recording files are stored. Leave empty to use the extension storage directory outside the workspace (recommended). Relative paths resolve from the first workspace folder; absolute paths are used as-is. [Open recordings folder](command:codexTerminalRecorder.openLogDirectory)"
           },
           "codexTerminalRecorder.diagnosticsLoggingEnabled": {
             "order": 13,
             "type": "boolean",
             "default": false,
+            "scope": "machine",
             "description": "Enable diagnostic logging for extension internals."
           },
           "codexTerminalRecorder.diagnosticsLogFileEnabled": {
             "order": 14,
             "type": "boolean",
             "default": false,
+            "scope": "machine",
             "markdownDescription": "Write diagnostics into a local log file when diagnostics logging is enabled. [Open diagnostics log](command:codexTerminalRecorder.openDiagnosticsLog)"
           }
         }
@@ -343,16 +373,14 @@
           "codexSwitch.debugLogging": {
             "type": "boolean",
             "default": false,
+            "scope": "machine",
             "description": "Enable additional diagnostic logging for account switching and profile sync."
           },
-          "codexSwitch.activeProfileScope": {
-            "type": "string",
-            "enum": [
-              "global",
-              "workspace"
-            ],
-            "default": "global",
-            "description": "Choose whether the active profile is shared across every workspace or stored per workspace."
+          "codexSwitch.profileActivityLogEnabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "machine",
+            "description": "Write profile and account-switch activity events to profile-activity.jsonl on this machine. Disabled by default."
           },
           "codexSwitch.storageMode": {
             "type": "string",
@@ -410,7 +438,7 @@
               "auto"
             ],
             "default": "ask",
-            "description": "Choose what Codex Multitool does when the active profile is low on remaining 5H usage and another fresh profile is available.",
+            "description": "Choose what Codex Multitool does when the active profile is low on remaining primary-window usage and another fresh profile is available.",
             "enumDescriptions": [
               "Do not suggest switching profiles.",
               "Ask before switching to a profile with fresher usage.",
@@ -453,6 +481,7 @@
                 "needsAuth",
                 "weeklyLow",
                 "coolingDown",
+                "notStarted",
                 "ready",
                 "staleEstimate",
                 "otherProfiles"
@@ -466,6 +495,7 @@
               "needsAuth",
               "weeklyLow",
               "coolingDown",
+              "notStarted",
               "ready",
               "staleEstimate",
               "otherProfiles"
@@ -476,6 +506,7 @@
                 "needsAuth",
                 "weeklyLow",
                 "coolingDown",
+                "notStarted",
                 "ready",
                 "staleEstimate",
                 "otherProfiles"
@@ -500,12 +531,12 @@
               "group"
             ],
             "default": "availability",
-            "description": "Sort order for accounts inside each Codex account switcher popup group.",
+            "description": "Sort order for visible accounts in the Codex account switcher popup. Availability keeps status groups; other modes sort all visible inactive accounts globally.",
             "enumDescriptions": [
               "Use the same availability-first order as the account status display.",
               "Show accounts whose next limit window resets soonest first.",
               "Show accounts whose next limit window resets latest first.",
-              "Show accounts whose 5-hour window resets soonest first.",
+              "Show accounts whose primary limit window resets soonest first.",
               "Show accounts whose weekly window resets soonest first.",
               "Show accounts with the most remaining usable limit first.",
               "Show accounts with the least remaining usable limit first.",
@@ -534,14 +565,14 @@
               "group"
             ],
             "default": "weeklyResetSoon",
-            "description": "Tie-break sort order for accounts whose primary Codex account switcher popup sort value is equal.",
+            "description": "Tie-break sort order for visible accounts whose primary Codex account switcher popup sort value is equal.",
             "enumDescriptions": [
               "Do not apply a secondary sort.",
               "Use the same availability-first order as the account status display.",
               "Show accounts whose next limit window resets soonest first.",
               "Show accounts whose next limit window resets latest first.",
-              "Show accounts whose 5-hour window resets soonest first.",
-              "Show accounts whose weekly window resets soonest first, ignoring accounts with 0 percent weekly remaining.",
+              "Show accounts whose primary limit window resets soonest first.",
+              "Show accounts whose weekly window resets soonest first, including exhausted accounts.",
               "Show accounts with the most remaining usable limit first.",
               "Show accounts with the least remaining usable limit first.",
               "Show accounts with the freshest limit observation first.",
@@ -572,7 +603,7 @@
             "type": "boolean",
             "default": false,
             "description": "Enable detailed rate-limit logging for debugging purposes.",
-            "scope": "window"
+            "scope": "machine"
           },
           "codexRatelimit.showOutputOnError": {
             "type": "boolean",

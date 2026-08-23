@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { formatInteger } = require('../ui/userFormatting');
 
 function getSessionBasePath(customPath) {
   if (customPath) {
@@ -51,8 +52,7 @@ function isSameOrNestedPath(candidatePath, parentPath) {
 
 function formatTokenNumber(value) {
   const numeric = Number(value);
-  const thousands = Math.round((Number.isFinite(numeric) ? numeric : 0) / 1000);
-  return `${thousands.toLocaleString('en-US')} K`;
+  return formatInteger(Number.isFinite(numeric) ? numeric : 0);
 }
 
 function formatTokenUsage(usage) {

@@ -18,7 +18,11 @@ class TerminalSelectionStatusBarController {
     );
     this.statusBarItem.command = SEND_TO_CODEX_COMMAND;
     this.statusBarItem.name = 'Send to Codex';
+    this.statusBarItem.text = `$(comment-discussion) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
+    this.statusBarItem.tooltip =
+      'Send the resolved terminal selection context to Codex Chat.';
     this.intervalHandle = undefined;
+    this.isVisible = false;
     this.lastVisibilityState = undefined;
   }
 
@@ -33,20 +37,17 @@ class TerminalSelectionStatusBarController {
   async refresh() {
     const configuration = loadConfiguration();
     if (!configuration.sendToCodexEnabled) {
-      this.hideWithReason('send-disabled');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'send-disabled');
       return;
     }
 
     if (!this.codexAvailabilityController.isTerminalSelectionSendAvailable()) {
-      this.hideWithReason('terminal-send-unavailable');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'terminal-send-unavailable');
       return;
     }
 
     if (!configuration.showCodexSelectionButton) {
-      this.hideWithReason('disabled-by-setting');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'disabled-by-setting');
       return;
     }
 
@@ -54,16 +55,11 @@ class TerminalSelectionStatusBarController {
     const selection = peekTerminalSelectionText(terminal);
 
     if (!selection.trim()) {
-      this.hideWithReason('no-terminal-selection');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'no-terminal-selection');
       return;
     }
 
-    this.statusBarItem.text = `$(comment-discussion) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
-    this.statusBarItem.tooltip =
-      'Send the resolved terminal selection context to Codex Chat.';
-    this.statusBarItem.show();
-    this.logVisibilityState('visible');
+    this.setVisible(true, 'visible');
   }
 
   dispose() {
@@ -75,7 +71,16 @@ class TerminalSelectionStatusBarController {
     this.statusBarItem.dispose();
   }
 
-  hideWithReason(reason) {
+  setVisible(visible, reason) {
+    if (this.isVisible !== visible) {
+      this.isVisible = visible;
+      if (visible) {
+        this.statusBarItem.show();
+      } else {
+        this.statusBarItem.hide();
+      }
+    }
+
     this.logVisibilityState(reason);
   }
 

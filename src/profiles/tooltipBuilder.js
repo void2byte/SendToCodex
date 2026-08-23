@@ -158,10 +158,14 @@ function createProfileTooltip(activeProfile, profiles, otherWindowProfileUsageBy
           ? ` ${dimHtml(`W &lt; ${lowWeeklyThresholdText}%`)}`
           : ` \`W < ${lowWeeklyThresholdText}%\``
         : '';
+      const notStartedBadge = status.windowNotStarted
+        ? ' `STARTS ON FIRST USE`'
+        : '';
       const summary = formatCompactRateSummary(status, now, {
         includePrimaryCountdown: true,
         includeSecondaryCountdown: true,
         percentageMode: 'remaining',
+        includePercentageLabel: true,
         roundLowWeeklyRemainingToZero: quickPickSettings.roundLowWeeklyRemainingToZero,
         lowRemainingPercentThreshold: quickPickSettings.lowWeeklyRemainingZeroThreshold
       })
@@ -180,7 +184,7 @@ function createProfileTooltip(activeProfile, profiles, otherWindowProfileUsageBy
       const windowsCell = muted && windowUsage ? dimWindowUsageHtml(windowUsage) : windowUsage;
 
       tooltip.appendMarkdown(
-        `| ${linkedName}${lowWeeklyBadge} | ${planCell} | ${limitsCell} | ${windowsCell} |\n`
+        `| ${linkedName}${lowWeeklyBadge}${notStartedBadge} | ${planCell} | ${limitsCell} | ${windowsCell} |\n`
       );
     });
 

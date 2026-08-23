@@ -3,14 +3,17 @@
 const vscode = require('vscode');
 const {
   DEFAULT_LOW_REMAINING_PERCENT_THRESHOLD,
+  getPlanSortRank,
   normalizeLowRemainingPercentThreshold
 } = require('./profileStatus');
+const { compareDisplayText } = require('../ui/userFormatting');
 
 const PROFILE_QUICK_PICK_SECTIONS = [
   { id: 'needsAuth', label: 'Needs auth' },
   { id: 'weeklyLow', label: 'Weekly low' },
-  { id: 'coolingDown', label: 'Cooling down' },
-  { id: 'ready', label: 'Ready' },
+  { id: 'coolingDown', label: 'Limit exhausted' },
+  { id: 'notStarted', label: 'Window not started' },
+  { id: 'ready', label: 'Available' },
   { id: 'staleEstimate', label: 'Stale / estimate' },
   { id: 'otherProfiles', label: 'Other profiles' }
 ];
@@ -36,7 +39,7 @@ const PROFILE_QUICK_PICK_SORT_OPTIONS = [
   },
   {
     id: 'fiveHourResetSoon',
-    label: '5H reset soon'
+    label: 'Primary reset soon'
   },
   {
     id: 'weeklyResetSoon',
@@ -89,6 +92,13 @@ function normalizeSectionOrder(value) {
   const normalized = Array.isArray(value)
     ? value.filter((sectionId) => knownIds.has(sectionId))
     : [];
+  if (
+    normalized.length > 0 &&
+    !normalized.includes('notStarted') &&
+    normalized.includes('ready')
+  ) {
+    normalized.splice(normalized.indexOf('ready'), 0, 'notStarted');
+  }
   for (const sectionId of DEFAULT_PROFILE_QUICK_PICK_SECTION_ORDER) {
     if (!normalized.includes(sectionId)) {
       normalized.push(sectionId);
@@ -185,11 +195,11 @@ function getOptionalTimestamp(value) {
 }
 
 function compareText(left, right) {
-  return String(left || '').localeCompare(String(right || ''));
+  return compareDisplayText(left, right);
 }
 
 function compareByName(left, right) {
-  return getProfileName(left).localeCompare(getProfileName(right));
+  return compareDisplayText(getProfileName(left), getProfileName(right));
 }
 
 function compareByOriginalIndex(left, right) {
@@ -249,11 +259,6 @@ function compareRemainingAsc(left, right) {
 }
 
 function getWeeklyResetSortTimestamp(value) {
-  const remaining = Number(value && value.weeklyRemainingPercent);
-  if (!Number.isFinite(remaining) || remaining <= 0) {
-    return null;
-  }
-
   return value && value.weeklyResetAt;
 }
 
@@ -265,7 +270,13 @@ function compareProfileQuickPickItemsBySortMode(left, right, sortMode) {
   }
 
   if (normalizedSortMode === 'plan') {
-    return compareText(left.planText, right.planText);
+    const leftRank = Number.isFinite(Number(left.planRank))
+      ? Number(left.planRank)
+      : getPlanSortRank(left.planText);
+    const rightRank = Number.isFinite(Number(right.planRank))
+      ? Number(right.planRank)
+      : getPlanSortRank(right.planText);
+    return leftRank - rightRank || compareText(left.planText, right.planText);
   }
 
   if (normalizedSortMode === 'group') {
@@ -311,10 +322,10 @@ function compareProfileQuickPickItemsBySortMode(left, right, sortMode) {
 }
 
 function compareProfileQuickPickItems(left, right, primarySortMode, secondarySortMode) {
-  const leftActive = Boolean(left && left.isActive);
-  const rightActive = Boolean(right && right.isActive);
-  if (leftActive !== rightActive) {
-    return leftActive ? -1 : 1;
+  const leftIsActive = left && left.isActive === true;
+  const rightIsActive = right && right.isActive === true;
+  if (leftIsActive !== rightIsActive) {
+    return leftIsActive ? -1 : 1;
   }
 
   const primarySort = compareProfileQuickPickItemsBySortMode(left, right, primarySortMode);

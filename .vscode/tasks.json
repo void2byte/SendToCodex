@@ -2,38 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Open Codex Multitool Extension Host (Isolated)",
+      "label": "Open Codex Multitool Extension Host",
       "type": "shell",
       "command": "code",
-      "windows": {
-        "command": "${env:LOCALAPPDATA}\\Programs\\Microsoft VS Code\\bin\\code.cmd"
-      },
-      "args": [
-        "--new-window",
-        "--user-data-dir=${workspaceFolder}\\.vscode-test\\user-data",
-        "--extensions-dir=${workspaceFolder}\\.vscode-test\\extensions",
-        "--disable-extensions",
-        "--disable-workspace-trust",
-        "--skip-welcome",
-        "--skip-release-notes",
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "--enable-proposed-api=screph.codex-terminal-recorder"
-      ],
-      "problemMatcher": []
-    },
-    {
-      "label": "Open Codex Multitool Extension Host (With User Extensions)",
-      "type": "shell",
-      "command": "code",
-      "windows": {
-        "command": "${env:LOCALAPPDATA}\\Programs\\Microsoft VS Code\\bin\\code.cmd"
-      },
       "args": [
         "--new-window",
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "--enable-proposed-api=screph.codex-terminal-recorder"
+        "--enable-proposed-api",
+        "screph.codex-terminal-recorder",
+        "${workspaceFolder}"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      }
     }
   ]
 }

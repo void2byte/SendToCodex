@@ -82,9 +82,7 @@ test('captures the active Codex conversation editor tab before account switch', 
 
   const { mod, restore } = loadWarmupModule(mock);
   try {
-    const context = mod.captureCurrentCodexChatContext(createLogger(), {
-      fallbackToSidebar: true
-    });
+    const context = mod.captureCurrentCodexChatContext(createLogger());
 
     assert.equal(context.kind, 'conversationEditor');
     assert.equal(context.uri, activeUri);
@@ -95,76 +93,17 @@ test('captures the active Codex conversation editor tab before account switch', 
   }
 });
 
-test('captures a sidebar conversation ID from the official Codex log', () => {
+test('does not infer an open chat from historical Codex log events', () => {
   const mock = createMockVscode();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-sidebar-capture-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-stale-chat-'));
   const logPath = path.join(directory, 'Codex.log');
   const conversationId = '019ed0b4-722c-7180-9d34-8cf7e7c5c455';
   fs.writeFileSync(
     logPath,
-    `2026-06-20 21:54:45.739 [info] maybe_resume_success conversationId=${conversationId} turnCount=243\n`
-  );
-
-  const { mod, restore } = loadWarmupModule(mock);
-  try {
-    const context = mod.captureCurrentCodexChatContext(createLogger(), {
-      fallbackToSidebar: true,
-      codexLogPath: logPath
-    });
-
-    assert.deepEqual(context, {
-      kind: 'sidebarConversation',
-      source: 'official-codex-log-resume',
-      conversationId,
-      route: `/local/${conversationId}`
-    });
-  } finally {
-    restore();
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('captures a newly created sidebar conversation ID from the official Codex log', () => {
-  const mock = createMockVscode();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-sidebar-created-'));
-  const logPath = path.join(directory, 'Codex.log');
-  const conversationId = '019ef956-3bb5-7422-b92f-66712ef49d7c';
-  fs.writeFileSync(
-    logPath,
-    `2026-06-24 13:14:46.150 [info] Conversation created conversationId=${conversationId}\n`
-  );
-
-  const { mod, restore } = loadWarmupModule(mock);
-  try {
-    const context = mod.captureCurrentCodexChatContext(createLogger(), {
-      fallbackToSidebar: true,
-      codexLogPath: logPath
-    });
-
-    assert.deepEqual(context, {
-      kind: 'sidebarConversation',
-      source: 'official-codex-log-created',
-      conversationId,
-      route: `/local/${conversationId}`
-    });
-  } finally {
-    restore();
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('does not capture a sidebar conversation ID rejected by the official Codex log', () => {
-  const mock = createMockVscode();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-sidebar-rejected-'));
-  const logPath = path.join(directory, 'Codex.log');
-  const rejectedId = '019ef699-6609-7eb1-b43d-28e0ad075654';
-  const goodId = '019ef698-7003-71a0-93f0-ce4b95c1dc38';
-  fs.writeFileSync(
-    logPath,
     [
-      `2026-06-24 00:28:14.528 [info] Conversation created conversationId=${goodId}`,
-      `2026-06-24 00:28:20.000 [info] Conversation created conversationId=${rejectedId}`,
-      `2026-06-24 00:28:54.112 [error] No turns for conversation conversationId=${rejectedId}`
+      `2026-06-20 21:54:45.739 [info] Conversation created conversationId=${conversationId}`,
+      `2026-06-20 21:54:46.000 [info] thread_stream_view_activity_changed active=true conversationId=${conversationId}`,
+      `2026-06-20 21:54:47.000 [info] maybe_resume_success conversationId=${conversationId} turnCount=243`
     ].join('\n')
   );
 
@@ -175,94 +114,20 @@ test('does not capture a sidebar conversation ID rejected by the official Codex 
       codexLogPath: logPath
     });
 
-    assert.deepEqual(context, {
-      kind: 'sidebarConversation',
-      source: 'official-codex-log-created',
-      conversationId: goodId,
-      route: `/local/${goodId}`
-    });
+    assert.equal(context, null);
+    assert.equal(mod.isRestorableCodexChatContext(context), false);
+    assert.equal(
+      mod.isRestorableCodexChatContext({
+        kind: 'sidebarConversation',
+        conversationId,
+        route: `/local/${conversationId}`
+      }),
+      false
+    );
+    assert.deepEqual(mock.externalUris, []);
   } finally {
     restore();
     fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('restores a captured sidebar conversation through the Codex URI handler', async () => {
-  const mock = createMockVscode({
-    commands: ['chatgpt.openSidebar']
-  });
-  mock.setExtension('openai.chatgpt', {
-    isActive: true,
-    activate: async () => {}
-  });
-  const conversationId = '019ed0b4-722c-7180-9d34-8cf7e7c5c455';
-  let verified = null;
-
-  const { mod, restore } = loadWarmupModule(mock);
-  try {
-    const restored = await mod.warmUpCodexAfterProfileSwitch(
-      'sidebar-route-test',
-      createLogger(),
-      {
-        restoreChatContext: {
-          kind: 'sidebarConversation',
-          source: 'official-codex-log',
-          conversationId,
-          route: `/local/${conversationId}`
-        },
-        codexLogPath: 'C:\\logs\\openai.chatgpt\\Codex.log',
-        waitForConversationResume: async (logPath, restoredId, options) => {
-          verified = { logPath, restoredId, options };
-          return { resumed: true, waitedMs: 5 };
-        },
-        sidebarResumeStartOffset: 123,
-        sidebarPreRouteDelayMs: 0,
-        sidebarPostRouteFocusDelayMs: 0,
-        showErrorMessage: false,
-        commandReadyTimeoutMs: 50,
-        commandTimeoutMs: 50,
-        pollIntervalMs: 1
-      }
-    );
-
-    assert.equal(restored, true);
-    assert.deepEqual(mock.externalUris, [
-      `vscode://openai.chatgpt/local/${conversationId}`
-    ]);
-    assert.equal(verified.restoredId, conversationId);
-    assert.equal(verified.options.startOffset, 123);
-    assert.deepEqual(
-      mock.commandCalls.map((call) => call.command),
-      ['chatgpt.openSidebar', 'chatgpt.openSidebar']
-    );
-  } finally {
-    restore();
-  }
-});
-
-test('reports an explicit failure when no sidebar conversation can be captured', async () => {
-  const mock = createMockVscode();
-  const { mod, restore } = loadWarmupModule(mock);
-  try {
-    const context = mod.captureCurrentCodexChatContext(createLogger(), {
-      fallbackToSidebar: true,
-      codexLogPath: 'C:\\missing\\Codex.log'
-    });
-    assert.equal(context.kind, 'sidebarUnavailable');
-
-    const restored = await mod.warmUpCodexAfterProfileSwitch(
-      'missing-sidebar-route',
-      createLogger(),
-      {
-        restoreChatContext: context,
-        showErrorMessage: true
-      }
-    );
-    assert.equal(restored, false);
-    assert.equal(mock.errorMessages.length, 1);
-    assert.match(mock.errorMessages[0], /Codex chat did not reopen/);
-  } finally {
-    restore();
   }
 });
 

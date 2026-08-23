@@ -7,7 +7,6 @@ const path = require('path');
 const SHARED_STORE_DIRNAME = '.codex-switch';
 const SHARED_PROFILES_DIRNAME = 'profiles';
 const SHARED_PROFILES_FILENAME = 'profiles.json';
-const SHARED_ACTIVE_PROFILE_FILENAME = 'active-profile.json';
 
 function getSharedStoreRoot() {
   return path.join(os.homedir(), SHARED_STORE_DIRNAME);
@@ -19,10 +18,6 @@ function getSharedProfilesDir() {
 
 function getSharedProfilesPath() {
   return path.join(getSharedStoreRoot(), SHARED_PROFILES_FILENAME);
-}
-
-function getSharedActiveProfilePath() {
-  return path.join(getSharedStoreRoot(), SHARED_ACTIVE_PROFILE_FILENAME);
 }
 
 function getSharedProfileSecretsPath(profileId) {
@@ -58,11 +53,9 @@ function deleteFileIfExists(filePath) {
 }
 
 module.exports = {
-  SHARED_ACTIVE_PROFILE_FILENAME,
   SHARED_PROFILES_FILENAME,
   deleteFileIfExists,
   ensureSharedStoreDirs,
-  getSharedActiveProfilePath,
   getSharedProfileSecretsPath,
   getSharedProfilesDir,
   getSharedProfilesPath,

@@ -1,12 +1,6 @@
 'use strict';
 
 const vscode = require('vscode');
-const {
-  captureSidebarConversationFromLog,
-  getFileSize,
-  waitForConversationResume
-} = require('./CodexSidebarConversation');
-
 const CODEX_EXTENSION_ID = 'openai.chatgpt';
 const CODEX_OPEN_SIDEBAR_COMMAND = 'chatgpt.openSidebar';
 const CODEX_NEW_CHAT_COMMAND = 'chatgpt.newChat';
@@ -41,7 +35,7 @@ const POST_SWITCH_RESTORE_STRATEGY_OPTIONS = Object.freeze([
     label: 'Verified editor restore',
     description: 'recommended',
     detail:
-      'Opens the previous conversation editor and verifies that the tab exists. Opens the sidebar only when no editor tab was captured.'
+      'Restores and verifies a previously open conversation editor. Does nothing when no editor tab was open.'
   },
   {
     id: POST_SWITCH_RESTORE_STRATEGIES.NATIVE_ONLY,
@@ -178,21 +172,6 @@ function getGroupViewColumn(group) {
   return Number.isFinite(viewColumn) && viewColumn > 0 ? viewColumn : undefined;
 }
 
-function createSidebarContext(source = 'fallback') {
-  return {
-    kind: 'sidebar',
-    source
-  };
-}
-
-function createUnavailableSidebarContext(error, source = 'sidebar-capture-failed') {
-  return {
-    kind: 'sidebarUnavailable',
-    source,
-    error: String(error || 'The current Codex sidebar conversation ID could not be captured.')
-  };
-}
-
 function createConversationContext(tab, group, source) {
   return {
     kind: 'conversationEditor',
@@ -208,22 +187,10 @@ function isRestorableCodexChatContext(context) {
     return false;
   }
 
-  if (context.kind === 'sidebar') {
-    return true;
-  }
-
-  if (context.kind === 'sidebarUnavailable') {
-    return Boolean(context.error);
-  }
-
-  if (context.kind === 'sidebarConversation') {
-    return Boolean(context.conversationId && context.route);
-  }
-
   return Boolean(context.kind === 'conversationEditor' && context.uri);
 }
 
-function captureCurrentCodexChatContext(logger, options = {}) {
+function captureCurrentCodexChatContext(logger) {
   const groups = vscode.window.tabGroups && Array.isArray(vscode.window.tabGroups.all)
     ? vscode.window.tabGroups.all
     : [];
@@ -283,27 +250,11 @@ function captureCurrentCodexChatContext(logger, options = {}) {
     return context;
   }
 
-  if (options.fallbackToSidebar) {
-    const sidebarCapture = captureSidebarConversationFromLog(
-      options.codexLogPath,
-      logger,
-      options
-    );
-    if (sidebarCapture.context) {
-      return sidebarCapture.context;
-    }
-
-    logger &&
-      logger.error &&
-      logger.error('Failed to capture the active Codex sidebar conversation before reload.', {
-        error: sidebarCapture.error
-      });
-    return createUnavailableSidebarContext(sidebarCapture.error);
-  }
-
   logger &&
     logger.info &&
-    logger.info('No restorable Codex chat tab is currently visible.');
+    logger.info(
+      'No Codex conversation editor tab is open; post-switch chat restore will be skipped.'
+    );
   return null;
 }
 
@@ -626,67 +577,6 @@ async function openCodexSidebar(logger, options = {}) {
     logger.info('Opened Codex sidebar after profile switch.');
 }
 
-async function restoreCodexSidebarConversation(context, logger, options = {}) {
-  if (!context || context.kind !== 'sidebarConversation' || !context.conversationId) {
-    throw new Error('A captured Codex sidebar conversation ID is required for route restore.');
-  }
-  if (!options.codexLogPath) {
-    throw new Error('The official Codex log path is unavailable; sidebar restore cannot be verified.');
-  }
-  if (!vscode.env || typeof vscode.env.openExternal !== 'function') {
-    throw new Error('VS Code does not expose env.openExternal for the Codex URI handler.');
-  }
-
-  await prepareCodexExtensionForWarmup(logger, {
-    ...options,
-    requiredCommands: options.requiredCommands || [CODEX_OPEN_SIDEBAR_COMMAND]
-  });
-
-  const configuredResumeLogOffset = Number(options.sidebarResumeStartOffset);
-  const resumeLogOffset = Number.isFinite(configuredResumeLogOffset)
-    ? Math.max(0, configuredResumeLogOffset)
-    : getFileSize(options.codexLogPath);
-  await openCodexSidebar(logger, options);
-  await sleep(Math.max(0, Number(options.sidebarPreRouteDelayMs || 1000)));
-
-  const uriScheme = String(vscode.env.uriScheme || 'vscode').trim() || 'vscode';
-  const deepLink = vscode.Uri.parse(
-    `${uriScheme}://${CODEX_EXTENSION_ID}/local/${encodeURIComponent(context.conversationId)}`
-  );
-  logger &&
-    logger.info &&
-    logger.info('Opening Codex sidebar conversation route after profile switch.', {
-      conversationId: context.conversationId,
-      route: context.route,
-      resumeLogOffset
-    });
-  const opened = await withTimeout(
-    vscode.env.openExternal(deepLink),
-    options.commandTimeoutMs || DEFAULT_COMMAND_TIMEOUT_MS,
-    `Codex URI handler ${deepLink.toString()}`
-  );
-  if (opened === false) {
-    throw new Error(`VS Code rejected the Codex conversation URI ${deepLink.toString()}.`);
-  }
-  await sleep(Math.max(0, Number(options.sidebarPostRouteFocusDelayMs || 250)));
-  await openCodexSidebar(logger, options);
-
-  const verifyResume = options.waitForConversationResume || waitForConversationResume;
-  const verification = await verifyResume(options.codexLogPath, context.conversationId, {
-    startOffset: resumeLogOffset,
-    timeoutMs: options.sidebarResumeTimeoutMs,
-    pollIntervalMs: options.sidebarResumePollIntervalMs
-  });
-  logger &&
-    logger.info &&
-    logger.info('Restored and verified the Codex sidebar conversation after profile switch.', {
-      conversationId: context.conversationId,
-      route: context.route,
-      waitedMs: verification && verification.waitedMs
-    });
-  return true;
-}
-
 async function prepareCodexExtensionForWarmup(logger, options = {}) {
   await activateCodexExtension(logger, options);
   await waitForCodexCommands(logger, options);
@@ -900,12 +790,15 @@ async function runLegacyCloseThenOpenWithRestore(context, logger, options = {}) 
 }
 
 async function warmUpCodexAfterProfileSwitch(reason, logger, options = {}) {
-  const restoreChatContext = isRestorableCodexChatContext(options.restoreChatContext)
-    ? options.restoreChatContext
-    : createUnavailableSidebarContext(
-        'No restorable Codex conversation context was captured before the account switch.',
-        'missing-restore-context'
-      );
+  const restoreChatContext = options.restoreChatContext;
+  if (!isRestorableCodexChatContext(restoreChatContext)) {
+    logger &&
+      logger.info &&
+      logger.info('Skipped Codex chat restore because no conversation editor tab was captured.', {
+        reason
+      });
+    return false;
+  }
   const strategy = normalizePostSwitchRestoreStrategy(options.restoreStrategy);
 
   try {
@@ -923,43 +816,30 @@ async function warmUpCodexAfterProfileSwitch(reason, logger, options = {}) {
         restoredSource: restoreChatContext.source || null
       });
 
-    if (restoreChatContext.kind === 'sidebarConversation') {
-      await restoreCodexSidebarConversation(restoreChatContext, logger, options);
-    } else if (
-      restoreChatContext.kind === 'sidebarUnavailable' ||
-      restoreChatContext.kind === 'sidebar'
-    ) {
-      throw new Error(
-        restoreChatContext.error ||
-          'Codex sidebar does not expose its active conversation ID, so the chat cannot be restored safely.'
-      );
-    } else {
-
-      switch (strategy) {
-        case POST_SWITCH_RESTORE_STRATEGIES.NATIVE_ONLY:
-          await runNativeOnlyRestore(restoreChatContext, logger, options);
-          break;
-        case POST_SWITCH_RESTORE_STRATEGIES.SIDEBAR_ONLY:
-          throw new Error(
-            'The sidebar-only strategy cannot restore a conversation and is disabled to avoid a false success.'
-          );
-        case POST_SWITCH_RESTORE_STRATEGIES.OPEN_WITH_IMMEDIATE:
-          await runOpenWithImmediateRestore(restoreChatContext, logger, options);
-          break;
-        case POST_SWITCH_RESTORE_STRATEGIES.OPEN_WITH_AFTER_NATIVE_SETTLE:
-          await runOpenWithAfterNativeSettleRestore(restoreChatContext, logger, options);
-          break;
-        case POST_SWITCH_RESTORE_STRATEGIES.MULTI_ATTEMPT_NO_CLOSE:
-          await runMultiAttemptNoCloseRestore(restoreChatContext, logger, options);
-          break;
-        case POST_SWITCH_RESTORE_STRATEGIES.LEGACY_CLOSE_THEN_OPEN_WITH:
-          await runLegacyCloseThenOpenWithRestore(restoreChatContext, logger, options);
-          break;
-        case POST_SWITCH_RESTORE_STRATEGIES.SIDEBAR_THEN_OPEN_WITH_VERIFY:
-        default:
-          await runSidebarThenOpenWithVerifyRestore(restoreChatContext, logger, options);
-          break;
-      }
+    switch (strategy) {
+      case POST_SWITCH_RESTORE_STRATEGIES.NATIVE_ONLY:
+        await runNativeOnlyRestore(restoreChatContext, logger, options);
+        break;
+      case POST_SWITCH_RESTORE_STRATEGIES.SIDEBAR_ONLY:
+        throw new Error(
+          'The sidebar-only strategy cannot restore a conversation and is disabled to avoid a false success.'
+        );
+      case POST_SWITCH_RESTORE_STRATEGIES.OPEN_WITH_IMMEDIATE:
+        await runOpenWithImmediateRestore(restoreChatContext, logger, options);
+        break;
+      case POST_SWITCH_RESTORE_STRATEGIES.OPEN_WITH_AFTER_NATIVE_SETTLE:
+        await runOpenWithAfterNativeSettleRestore(restoreChatContext, logger, options);
+        break;
+      case POST_SWITCH_RESTORE_STRATEGIES.MULTI_ATTEMPT_NO_CLOSE:
+        await runMultiAttemptNoCloseRestore(restoreChatContext, logger, options);
+        break;
+      case POST_SWITCH_RESTORE_STRATEGIES.LEGACY_CLOSE_THEN_OPEN_WITH:
+        await runLegacyCloseThenOpenWithRestore(restoreChatContext, logger, options);
+        break;
+      case POST_SWITCH_RESTORE_STRATEGIES.SIDEBAR_THEN_OPEN_WITH_VERIFY:
+      default:
+        await runSidebarThenOpenWithVerifyRestore(restoreChatContext, logger, options);
+        break;
     }
 
     logger &&

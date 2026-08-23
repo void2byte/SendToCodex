@@ -38,7 +38,8 @@ function createItem(overrides) {
     nextResetAt: overrides.nextResetAt || null,
     observedAt: overrides.observedAt || null,
     primaryRemainingPercent: overrides.primaryRemainingPercent ?? 50,
-    lowestRemainingPercent: overrides.lowestRemainingPercent ?? 50
+    lowestRemainingPercent: overrides.lowestRemainingPercent ?? 50,
+    isActive: overrides.isActive === true
   };
 }
 
@@ -68,7 +69,7 @@ test('secondary profile sort applies only when the primary sort value is equal',
   );
 });
 
-test('weekly reset secondary sort ignores accounts with zero weekly remaining', () => {
+test('weekly reset secondary sort includes exhausted accounts by reset time', () => {
   const { sortProfileQuickPickItems } = loadQuickPickSettings();
   const now = Date.parse('2026-07-08T10:00:00.000Z');
   const items = [
@@ -97,17 +98,69 @@ test('weekly reset secondary sort ignores accounts with zero weekly remaining', 
   assert.deepEqual(
     sorted.map((item) => item.profileDisplayName),
     [
+      'A zero weekly remaining',
       'B nonzero earlier weekly reset',
-      'C nonzero later weekly reset',
-      'A zero weekly remaining'
+      'C nonzero later weekly reset'
     ]
   );
 });
 
+test('plan sorting uses account tier order instead of alphabetic labels', () => {
+  const { sortProfileQuickPickItems } = loadQuickPickSettings();
+  const items = [
+    createItem({ name: 'Pro', planText: 'PRO' }),
+    createItem({ name: 'Free', planText: 'FREE' }),
+    createItem({ name: 'Plus', planText: 'PLUS' })
+  ];
+
+  assert.deepEqual(
+    sortProfileQuickPickItems(items, 'plan', 'none').map(
+      (item) => item.profileDisplayName
+    ),
+    ['Free', 'Plus', 'Pro']
+  );
+});
+
+test('all account sorting modes keep the active account first', () => {
+  const { sortProfileQuickPickItems } = loadQuickPickSettings();
+  const items = [
+    createItem({ name: 'Alpha', planText: 'FREE' }),
+    createItem({ name: 'Zulu active', planText: 'PRO', isActive: true }),
+    createItem({ name: 'Mike', planText: 'PLUS' })
+  ];
+
+  assert.deepEqual(
+    sortProfileQuickPickItems(items, 'name', 'none').map((item) => item.profileDisplayName),
+    ['Zulu active', 'Alpha', 'Mike']
+  );
+});
+
 test('account switcher settings default to weekly reset as the secondary sort', () => {
-  const { getProfileQuickPickSettings } = loadQuickPickSettings();
+  const {
+    getProfileQuickPickSettings,
+    normalizeSectionOrder
+  } = loadQuickPickSettings();
 
   assert.equal(getProfileQuickPickSettings().secondaryProfileSort, 'weeklyResetSoon');
+  assert.deepEqual(
+    normalizeSectionOrder([
+      'needsAuth',
+      'weeklyLow',
+      'coolingDown',
+      'ready',
+      'staleEstimate',
+      'otherProfiles'
+    ]),
+    [
+      'needsAuth',
+      'weeklyLow',
+      'coolingDown',
+      'notStarted',
+      'ready',
+      'staleEstimate',
+      'otherProfiles'
+    ]
+  );
 });
 
 test('account switcher settings default weekly zero threshold to one percent', () => {

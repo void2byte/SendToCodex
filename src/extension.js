@@ -14,7 +14,7 @@ const { SelectionLocator } = require('./terminalSelection/SelectionLocator');
 const { TerminalLogManager } = require('./terminalLogs/TerminalLogManager');
 const { CodexAvailabilityController } = require('./codex/CodexAvailabilityController');
 const { CodexCommandClient } = require('./codex/CodexCommandClient');
-const { getFileSize, getOfficialCodexLogPath } = require('./codex/CodexSidebarConversation');
+const { getOfficialCodexLogPath } = require('./codex/CodexSidebarConversation');
 const {
   DEFAULT_PENDING_WARMUP_MAX_AGE_MS,
   DEFAULT_POST_SWITCH_WARMUP_DELAY_MS,
@@ -31,17 +31,24 @@ const { TerminalSelectionCodexSender } = require('./codex/TerminalSelectionCodex
 const { createSelectionPopupPresenter } = require('./native/presenter');
 const { registerProfileCommands } = require('./profiles/commands');
 const { areProfileFeaturesEnabled } = require('./profiles/featureFlags');
+const { decideObservedAuthChange } = require('./profiles/authChangePolicy');
 const { ProfileManager } = require('./profiles/profileManager');
 const { RateLimitMonitor } = require('./profiles/rateLimitMonitor');
+const {
+  getActiveRateLimitActivationJob,
+  tryStartRateLimitActivationWindowWorker
+} = require('./profiles/rateLimitActivationWindow');
 const { displayAccountLabel } = require('./profiles/privacy');
 const { NativeSelectionOverlayController } = require('./ui/NativeSelectionOverlayController');
 const { EditorSelectionStatusBarController } = require('./ui/EditorSelectionStatusBarController');
 const { ProfileStatusBarController } = require('./profiles/statusBar');
 const { SelectionPopupSuppression } = require('./ui/SelectionPopupSuppression');
+const { installNotificationPolicy } = require('./ui/notificationPolicy');
 const { TerminalSelectionStatusBarController } = require('./ui/TerminalSelectionStatusBarController');
 
 const CODEX_POST_SWITCH_WARMUP_KEY = 'codexSwitch.pendingCodexPostSwitchWarmup';
 const CODEX_POST_SWITCH_AUTH_SYNC_KEY = 'codexSwitch.pendingPostSwitchAuthSync';
+const UNMANAGED_AUTH_NOTICE_KEY = 'codexSwitch.dismissedUnmanagedAuthNoticeKey';
 const AUTH_WATCHER_SETTLE_TIMEOUT_MS = 15 * 1000;
 const ACTIVE_WINDOW_USAGE_HEARTBEAT_MS = 30 * 1000;
 
@@ -52,6 +59,7 @@ function activate(context) {
   const logger = new FileLogger(context.logUri.fsPath, output);
   const codexLogPath = getOfficialCodexLogPath(context.logUri.fsPath);
   logger.reloadConfiguration();
+  installNotificationPolicy(logger);
   logger.info('Send to Codex extension activated.', {
     vscodeVersion: vscode.version,
     extensionVersion: context.extension && context.extension.packageJSON
@@ -67,14 +75,51 @@ function activate(context) {
     outputChannelName: OUTPUT_CHANNEL_NAME
   });
 
-  const manager = new TerminalLogManager(context, output, logger);
-  context.subscriptions.push(manager);
   const profileManager = new ProfileManager(context, logger);
-  const profileStatusBarController = new ProfileStatusBarController();
   const rateLimitMonitor = new RateLimitMonitor(profileManager, logger);
   context.subscriptions.push(profileManager);
-  context.subscriptions.push(profileStatusBarController);
   context.subscriptions.push(rateLimitMonitor);
+  void profileManager.initializePortableProfileVault().catch((error) => {
+    logger.warn('Failed to initialize the portable Codex profile vault.', {
+      error: error && error.message ? error.message : String(error)
+    });
+  });
+  if (
+    tryStartRateLimitActivationWindowWorker(
+      context,
+      profileManager,
+      rateLimitMonitor,
+      logger,
+      { codexLogPath }
+    )
+  ) {
+    logger.info('Started the dedicated Codex counter-activation window worker.');
+    return;
+  }
+
+  const getActiveCounterActivationOwner = () =>
+    getActiveRateLimitActivationJob(profileManager.getStorageDir());
+
+  const warmUpCodexOutsideCounterActivation = async (reason, options = {}) => {
+    const activeActivation = getActiveCounterActivationOwner();
+    if (activeActivation) {
+      logger.info(
+        'Suppressed Codex chat restore in this window because counter activation owns the Codex UI.',
+        {
+          reason,
+          activationJobId: activeActivation.jobId,
+          workerWorkspacePath: activeActivation.workerWorkspacePath
+        }
+      );
+      return { skipped: true, reason: 'counter-activation-window-owner' };
+    }
+    return warmUpCodexAfterProfileSwitch(reason, logger, options);
+  };
+
+  const manager = new TerminalLogManager(context, output, logger);
+  context.subscriptions.push(manager);
+  const profileStatusBarController = new ProfileStatusBarController();
+  context.subscriptions.push(profileStatusBarController);
   const popupSuppression = new SelectionPopupSuppression(logger);
   const selectionResolver = new ActiveTerminalSelectionResolver(manager);
   const selectionLocator = new SelectionLocator(selectionResolver, output, popupSuppression);
@@ -182,34 +227,34 @@ function activate(context) {
 
   const shouldAcceptAuthChangeForThisWindow = async (authData) => {
     const expected = getExpectedWindowAuthChange();
-    if (!expected) {
-      logger.info('Ignoring Codex auth.json watcher event that this window did not initiate.');
-      return false;
-    }
-
-    if (!expected.profileId) {
-      return true;
-    }
-
-    const matchedProfile = authData
+    const matchedProfile = expected && expected.profileId && authData
       ? await profileManager.findProfileMatchingAuthData(authData)
       : undefined;
-    if (matchedProfile && matchedProfile.id === expected.profileId) {
+    const decision = decideObservedAuthChange({
+      windowFocused: !(vscode.window.state && vscode.window.state.focused === false),
+      expectedChange: expected,
+      actualProfileId: matchedProfile ? matchedProfile.id : undefined
+    });
+
+    if (decision.accept) {
+      logger.info('Accepting observed Codex auth.json account change for this window.', {
+        reason: decision.reason,
+        expectedProfileId: expected && expected.profileId ? expected.profileId : null,
+        actualProfileId: matchedProfile ? matchedProfile.id : null
+      });
       return true;
     }
 
-    logger.warn('Ignoring Codex auth.json watcher event for an unexpected profile.', {
-      expectedProfileId: expected.profileId,
+    logger.info('Ignoring observed Codex auth.json account change in a background window.', {
+      reason: decision.reason,
+      expectedProfileId: expected && expected.profileId ? expected.profileId : null,
       actualProfileId: matchedProfile ? matchedProfile.id : null
     });
     return false;
   };
 
   const getCodexChatContextForProfileSwitch = () => {
-    const contextToRestore = captureCurrentCodexChatContext(logger, {
-      fallbackToSidebar: true,
-      codexLogPath
-    });
+    const contextToRestore = captureCurrentCodexChatContext(logger);
     logger.debug('Codex restore debug: getCodexChatContextForProfileSwitch result.', {
       contextToRestore
     });
@@ -225,11 +270,6 @@ function activate(context) {
       .get('postSwitchRestoreStrategy', DEFAULT_POST_SWITCH_RESTORE_STRATEGY)
   );
 
-  const getPostSwitchWarmupDelayMs = (restoreChatContext) =>
-    restoreChatContext && restoreChatContext.kind === 'sidebarConversation'
-      ? 1000
-      : DEFAULT_POST_SWITCH_WARMUP_DELAY_MS;
-
   const scheduleCodexPostSwitchWarmup = async (profileId, options = {}) => {
     logger.debug('Codex restore debug: scheduleCodexPostSwitchWarmup called.', {
       profileId: profileId || null,
@@ -244,59 +284,83 @@ function activate(context) {
       return;
     }
 
+    const activeActivation = getActiveCounterActivationOwner();
+    if (activeActivation) {
+      logger.info(
+        'Did not schedule a Codex chat restore because counter activation owns the Codex UI.',
+        {
+          profileId,
+          activationJobId: activeActivation.jobId,
+          workerWorkspacePath: activeActivation.workerWorkspacePath
+        }
+      );
+      return;
+    }
+
     const restoreChatContext = getCodexChatContextForProfileSwitch();
     const restoreStrategy = getPostSwitchRestoreStrategy();
-    const codexLogSize = getFileSize(codexLogPath);
     logger.debug('Codex restore debug: captured context and strategy for profile switch.', {
       profileId,
       restoreChatContext,
-      restoreStrategy,
-      codexLogSize
+      restoreStrategy
     });
     if (options.willReloadWindow) {
       const scheduledAt = Date.now();
-      await context.workspaceState.update(CODEX_POST_SWITCH_WARMUP_KEY, {
-        profileId,
-        scheduledAt,
-        restoreChatContext,
-        restoreStrategy,
-        codexLogSize
-      });
+      await context.workspaceState.update(
+        CODEX_POST_SWITCH_WARMUP_KEY,
+        restoreChatContext
+          ? {
+              profileId,
+              scheduledAt,
+              restoreChatContext,
+              restoreStrategy
+            }
+          : undefined
+      );
       await context.workspaceState.update(CODEX_POST_SWITCH_AUTH_SYNC_KEY, {
         profileId,
         scheduledAt
       });
+      if (!restoreChatContext) {
+        logger.info(
+          'Skipped post-switch chat restore because no Codex conversation editor tab is open.',
+          { profileId }
+        );
+        return;
+      }
       logger.debug('Codex restore debug: pending post-switch warm-up saved to workspaceState.', {
         key: CODEX_POST_SWITCH_WARMUP_KEY,
         profileId,
         restoreChatContext,
-        restoreStrategy,
-        codexLogSize
+        restoreStrategy
       });
       logger.info('Scheduled Codex post-switch warm-up for the next VS Code activation.', {
         profileId,
         restoreChatKind: restoreChatContext ? restoreChatContext.kind : null,
-        restoreStrategy,
-        codexLogSize
+        restoreStrategy
       });
       return;
     }
 
-    const delayMs = getPostSwitchWarmupDelayMs(restoreChatContext);
+    if (!restoreChatContext) {
+      logger.info(
+        'Skipped post-switch chat restore because no Codex conversation editor tab is open.',
+        { profileId }
+      );
+      return;
+    }
+
     setTimeout(() => {
       logger.debug('Codex restore debug: running delayed no-reload post-switch warm-up.', {
         profileId,
         restoreChatContext,
-        restoreStrategy,
-        codexLogSize
+        restoreStrategy
       });
-      void warmUpCodexAfterProfileSwitch('profile-switch-no-reload', logger, {
+      void warmUpCodexOutsideCounterActivation('profile-switch-no-reload', {
         restoreChatContext,
-        restoreStrategy,
-        codexLogPath,
-        sidebarResumeStartOffset: codexLogSize
+        restoreStrategy
       });
-    }, delayMs);
+    }, DEFAULT_POST_SWITCH_WARMUP_DELAY_MS);
   };
 
   const consumePendingPostSwitchAuthSync = async () => {
@@ -322,20 +386,40 @@ function activate(context) {
     await profileManager.syncCurrentAuthToMatchingProfile();
     const pendingProfileId = await consumePendingPostSwitchAuthSync();
     if (!pendingProfileId) {
-      logger.info(
-        'Skipping startup Codex auth sync because this activation was not caused by a profile-switch reload.'
-      );
-      await profileManager.initializeWindowActiveProfileFromCurrentAuth(true);
+      const windowActive = await profileManager.getWindowActiveProfileMatch();
+      const restoredAuth = windowActive.profileId
+        ? await profileManager.maybeSyncToCodexAuthFile(windowActive.profileId)
+        : false;
+      if (restoredAuth) {
+        logger.info(
+          'Restored the workspace account after VS Code startup; reloading once so Codex uses it.',
+          { profileId: windowActive.profileId }
+        );
+        void vscode.commands.executeCommand('workbench.action.reloadWindow');
+        return;
+      }
       await rateLimitMonitor.refresh(true);
+      await profileManager.createProfileBackup('activation');
+      await profileManager.pruneAuthBackups();
       return;
     }
 
     logger.info('Applying startup Codex auth sync for a profile-switch reload.', {
       profileId: pendingProfileId
     });
-    await profileManager.maybeSyncToCodexAuthFile(pendingProfileId);
+    const restoredAuth = await profileManager.maybeSyncToCodexAuthFile(pendingProfileId);
     await profileManager.initializeWindowActiveProfileFromCurrentAuth(true);
+    if (restoredAuth) {
+      logger.info(
+        'The selected workspace account changed during reload; reloading once more to apply it to Codex.',
+        { profileId: pendingProfileId }
+      );
+      void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      return;
+    }
     await rateLimitMonitor.refresh(true);
+    await profileManager.createProfileBackup('activation');
+    await profileManager.pruneAuthBackups();
   };
 
   const runPendingCodexPostSwitchWarmup = async () => {
@@ -361,20 +445,27 @@ function activate(context) {
       return;
     }
 
-    const delayMs = getPostSwitchWarmupDelayMs(pending.restoreChatContext);
+    if (!isRestorableCodexChatContext(pending.restoreChatContext)) {
+      logger.warn('Skipped unsafe post-switch Codex chat context.', {
+        profileId: pending.profileId || null,
+        restoreChatKind:
+          pending.restoreChatContext && pending.restoreChatContext.kind
+            ? pending.restoreChatContext.kind
+            : null
+      });
+      return;
+    }
+
     setTimeout(() => {
       logger.debug('Codex restore debug: running delayed after-reload post-switch warm-up.', {
         pending,
-        restoreStrategy: pending.restoreStrategy || getPostSwitchRestoreStrategy(),
-        codexLogSize: pending.codexLogSize
+        restoreStrategy: pending.restoreStrategy || getPostSwitchRestoreStrategy()
       });
-      void warmUpCodexAfterProfileSwitch('profile-switch-after-reload', logger, {
+      void warmUpCodexOutsideCounterActivation('profile-switch-after-reload', {
         restoreChatContext: pending.restoreChatContext,
-        restoreStrategy: pending.restoreStrategy || getPostSwitchRestoreStrategy(),
-        codexLogPath,
-        sidebarResumeStartOffset: pending.codexLogSize
+        restoreStrategy: pending.restoreStrategy || getPostSwitchRestoreStrategy()
       });
-    }, delayMs);
+    }, DEFAULT_POST_SWITCH_WARMUP_DELAY_MS);
   };
 
   const getCurrentAuthNoticeKey = (authData) => {
@@ -397,35 +488,54 @@ function activate(context) {
   };
 
   const maybeNotifyUnmanagedCurrentProfile = async () => {
-    if (!areProfileFeaturesEnabled()) {
+    if (
+      !areProfileFeaturesEnabled() ||
+      (vscode.window.state && vscode.window.state.focused === false)
+    ) {
       return;
     }
 
-    let shouldRecheckAfterNotice = false;
     if (unmanagedAuthNoticeInFlight) {
       return;
     }
+    unmanagedAuthNoticeInFlight = true;
+    let shouldRecheckAfterNotice = false;
 
     try {
       const currentAuthMatch = await profileManager.getCurrentAuthProfileMatch();
       if (!currentAuthMatch.hasAuth) {
         lastUnmanagedAuthNoticeKey = undefined;
+        if (context.globalState.get(UNMANAGED_AUTH_NOTICE_KEY) !== undefined) {
+          await context.globalState.update(UNMANAGED_AUTH_NOTICE_KEY, undefined);
+        }
         return;
       }
 
       if (currentAuthMatch.profileId) {
         lastUnmanagedAuthNoticeKey = undefined;
+        if (context.globalState.get(UNMANAGED_AUTH_NOTICE_KEY) !== undefined) {
+          await context.globalState.update(UNMANAGED_AUTH_NOTICE_KEY, undefined);
+        }
         return;
       }
 
       const authData = await profileManager.loadCurrentAuthData();
       const noticeKey = getCurrentAuthNoticeKey(authData);
-      if (noticeKey === lastUnmanagedAuthNoticeKey) {
+      if (
+        noticeKey === lastUnmanagedAuthNoticeKey ||
+        noticeKey === context.globalState.get(UNMANAGED_AUTH_NOTICE_KEY)
+      ) {
+        return;
+      }
+
+      // Only the currently focused VS Code window may own this cross-window notice. Checking
+      // again after the file reads prevents a window that lost focus mid-refresh from showing it.
+      if (vscode.window.state && vscode.window.state.focused === false) {
         return;
       }
 
       lastUnmanagedAuthNoticeKey = noticeKey;
-      unmanagedAuthNoticeInFlight = true;
+      await context.globalState.update(UNMANAGED_AUTH_NOTICE_KEY, noticeKey);
       shouldRecheckAfterNotice = true;
 
       const addLabel = 'Add current profile';
@@ -558,7 +668,56 @@ function activate(context) {
 
     await profileManager.syncCurrentAuthToMatchingProfile();
     await refreshProfileUi();
+    if (event.source === 'auth' && !shouldAcceptAuthChange) {
+      return;
+    }
     await rateLimitMonitor.refresh(true);
+  };
+
+  const reconcileFocusedWindowAuth = async () => {
+    if (!areProfileFeaturesEnabled()) {
+      return;
+    }
+
+    try {
+      const activeActivation = getActiveCounterActivationOwner();
+      if (activeActivation) {
+        logger.info(
+          'Kept this workspace account unchanged while counter activation owns auth.json.',
+          { activationJobId: activeActivation.jobId }
+        );
+        return;
+      }
+
+      const windowActive = await profileManager.getWindowActiveProfileMatch();
+      if (!windowActive.profileId) {
+        await maybeNotifyUnmanagedCurrentProfile();
+        return;
+      }
+
+      const current = await profileManager.getCurrentAuthProfileMatch();
+      if (current.profileId === windowActive.profileId) {
+        await maybeNotifyUnmanagedCurrentProfile();
+        return;
+      }
+
+      markWindowAuthChangeExpected({ profileId: windowActive.profileId });
+      const restored = await profileManager.maybeSyncToCodexAuthFile(
+        windowActive.profileId
+      );
+      logger.info('Restored this workspace account after the VS Code window regained focus.', {
+        profileId: windowActive.profileId,
+        previousAuthProfileId: current.profileId || null,
+        changedAuthFile: restored
+      });
+      await profileManager.syncCurrentAuthToMatchingProfile();
+      await refreshProfileUi();
+      await rateLimitMonitor.refresh(true);
+    } catch (error) {
+      logger.error('Failed to reconcile Codex account after window focus.', {
+        error: error && error.message ? error.message : String(error)
+      });
+    }
   };
 
   registerProfileCommands(context, profileManager, rateLimitMonitor, refreshProfileUi, {
@@ -598,6 +757,11 @@ function activate(context) {
     rateLimitMonitor.onDidChange(() => {
       void refreshProfileUi();
     }),
+    vscode.window.onDidChangeWindowState((windowState) => {
+      if (windowState.focused) {
+        void reconcileFocusedWindowAuth();
+      }
+    }),
     {
       dispose() {
         profileManager.clearActiveWindowProfileUsage();
@@ -634,11 +798,9 @@ function activate(context) {
     vscode.commands.registerCommand(
       'codexTerminalRecorder.internal.warmUpCodexAfterProfileSwitch',
       async () => {
-        await warmUpCodexAfterProfileSwitch('manual-internal-command', logger, {
+        await warmUpCodexOutsideCounterActivation('manual-internal-command', {
           restoreChatContext: getCodexChatContextForProfileSwitch(),
-          restoreStrategy: getPostSwitchRestoreStrategy(),
-          codexLogPath,
-          sidebarResumeStartOffset: getFileSize(codexLogPath)
+          restoreStrategy: getPostSwitchRestoreStrategy()
         });
       }
     ),

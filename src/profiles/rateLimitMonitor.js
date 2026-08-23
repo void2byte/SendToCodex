@@ -16,10 +16,10 @@ const {
 } = require('./profileStatus');
 const { getProfileQuickPickSettings } = require('./quickPickSettings');
 const { displayProfileName } = require('./privacy');
+const { showUnexpectedRateLimitResetDecision } = require('./paidLimitResetPrompt');
 
 const LOW_USAGE_SWITCH_PROMPT_STATE_KEY = 'codexSwitch.lowUsageSwitchPrompt';
 const LOW_USAGE_SWITCH_PROMPT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
-
 class RateLimitMonitor {
   constructor(profileManager, logger) {
     this.profileManager = profileManager;
@@ -33,6 +33,7 @@ class RateLimitMonitor {
     this.lastLowUsagePromptKey = null;
     this.lastLowUsagePromptAt = 0;
     this.lowUsagePromptInFlight = false;
+    this.unexpectedResetPromptInFlight = false;
     this.sessionFileByProfileId = new Map();
     this.latestRefreshId = 0;
     this.refreshInFlight = null;
@@ -218,7 +219,13 @@ class RateLimitMonitor {
     this.logObservedPlanChange(profile, observation, source);
     this.lastError = null;
     this.lastObservation = observation;
-    await this.profileManager.recordRateLimitObservation(profileId, observation);
+    const persistenceResult = this.profileManager.recordRateLimitObservationWithResult
+      ? await this.profileManager.recordRateLimitObservationWithResult(profileId, observation)
+      : {
+          changed: await this.profileManager.recordRateLimitObservation(profileId, observation),
+          unexpectedResetWindows: [],
+          observedAt: observation.recordTimestampMs
+        };
     this.setRefreshResult({
       source,
       outcome: 'fresh',
@@ -227,8 +234,65 @@ class RateLimitMonitor {
       force: Boolean(force)
     });
     this.onDidChangeEmitter.fire();
+    if (
+      persistenceResult &&
+      Array.isArray(persistenceResult.unexpectedResetWindows) &&
+      persistenceResult.unexpectedResetWindows.length > 0
+    ) {
+      void this.maybeOfferPaidProfileLimitReset(profile, persistenceResult);
+    }
     void this.maybeSuggestLowUsageSwitch(profileId);
     return true;
+  }
+
+  async maybeOfferPaidProfileLimitReset(profile, resetResult) {
+    if (
+      this.unexpectedResetPromptInFlight ||
+      !this.profileManager ||
+      typeof this.profileManager.resetPaidProfileRateLimits !== 'function'
+    ) {
+      return false;
+    }
+
+    this.unexpectedResetPromptInFlight = true;
+    try {
+      const profileName = displayProfileName(profile);
+      const decision = await showUnexpectedRateLimitResetDecision({
+        message: `Codex limits reset early for ${profileName}. Was this a shared reset?`,
+        detail:
+          'Choose “Shared reset” only if OpenAI reset all paid accounts. Choose “Only this account” to keep every other stored counter unchanged; this account already has fresh server data.'
+      });
+      if (decision !== 'shared') {
+        if (this.logger) {
+          this.logger.info('Kept other paid-account counters after an early limit reset.', {
+            profileId: profile && profile.id,
+            decision
+          });
+        }
+        return false;
+      }
+
+      const resetProfileCount = await this.profileManager.resetPaidProfileRateLimits(
+        resetResult && resetResult.observedAt
+      );
+      if (this.logger) {
+        this.logger.info('Accepted the out-of-schedule paid-account limit reset prompt.', {
+          profileId: profile && profile.id,
+          profileCount: resetProfileCount
+        });
+      }
+      return true;
+    } catch (error) {
+      if (this.logger) {
+        this.logger.warn('Failed to handle an out-of-schedule rate-limit reset prompt.', {
+          profileId: profile && profile.id,
+          error: error && error.message ? error.message : String(error)
+        });
+      }
+      return false;
+    } finally {
+      this.unexpectedResetPromptInFlight = false;
+    }
   }
 
   async getCodexAppServerRateLimitForProfile(profileId, profile, authData, force) {
@@ -402,9 +466,27 @@ class RateLimitMonitor {
 
     const state = this.getLowUsagePromptState();
     const lastPromptAt = Number(state.lastPromptAt);
-    return Number.isFinite(lastPromptAt) &&
+    return state.lastPromptKey === promptKey &&
+      Number.isFinite(lastPromptAt) &&
       now - lastPromptAt >= 0 &&
       now - lastPromptAt < LOW_USAGE_SWITCH_PROMPT_COOLDOWN_MS;
+  }
+
+  getLowUsagePromptKey(activeProfile, threshold, behavior) {
+    const primaryWindow =
+      activeProfile &&
+      activeProfile.rateLimitState &&
+      activeProfile.rateLimitState.primary;
+    const primaryResetAt = Number(primaryWindow && primaryWindow.resetAt);
+    const unexpectedResetCount = Math.max(
+      0,
+      Math.round(Number(primaryWindow && primaryWindow.unexpectedResetCount) || 0)
+    );
+    const windowCycle = Number.isFinite(primaryResetAt) && primaryResetAt > 0
+      ? Math.round(primaryResetAt)
+      : 'unknown';
+
+    return `${behavior}:${activeProfile.id}:${threshold}:${windowCycle}:${unexpectedResetCount}`;
   }
 
   async disableLowUsageSwitchPrompts() {
@@ -442,9 +524,9 @@ class RateLimitMonitor {
       {
         canPickMany: true,
         ignoreFocusOut: true,
-        title: 'Codex profile is low on 5H usage',
+        title: 'Codex profile is low on primary-window usage',
         placeHolder:
-          `Profile "${displayProfileName(activeProfile)}" is at or below ${threshold}% 5H remaining. Select one or both actions.`
+          `Profile "${displayProfileName(activeProfile)}" is at or below ${threshold}% primary-window remaining. Select one or both actions.`
       }
     );
 
@@ -516,7 +598,7 @@ class RateLimitMonitor {
         return;
       }
 
-      const promptKey = `${behavior}:${activeProfileId}:${candidate.id}:${threshold}`;
+      const promptKey = this.getLowUsagePromptKey(activeProfile, threshold, behavior);
       if (this.shouldSuppressLowUsagePrompt(promptKey, now)) {
         return;
       }
@@ -578,6 +660,9 @@ class RateLimitMonitor {
 
   async runRefresh(force) {
     const refreshId = ++this.latestRefreshId;
+    let coordinatedProfileId = null;
+    let refreshClaim = null;
+    let refreshSucceeded = false;
 
     try {
       if (!areProfileFeaturesEnabled()) {
@@ -644,6 +729,25 @@ class RateLimitMonitor {
         }
       }
 
+      if (this.profileManager.claimRateLimitRefresh) {
+        refreshClaim = this.profileManager.claimRateLimitRefresh(activeProfileId, {
+          minimumFreshMs: this.getRefreshIntervalMs(),
+          failureBackoffMs: Math.max(15 * 1000, this.getRefreshIntervalMs())
+        });
+        if (!refreshClaim.acquired) {
+          this.lastError = null;
+          this.setRefreshResult({
+            source: 'sharedRefreshCoordinator',
+            outcome: refreshClaim.reason,
+            profileId: activeProfileId,
+            force: Boolean(force)
+          });
+          this.onDidChangeEmitter.fire();
+          return;
+        }
+        coordinatedProfileId = activeProfileId;
+      }
+
       let usageApiError = null;
       if (this.shouldUseUsageApi()) {
         let authData = await this.profileManager.loadAuthData(activeProfileId);
@@ -668,6 +772,7 @@ class RateLimitMonitor {
             }
 
             if (appServerResult.found) {
+              refreshSucceeded = true;
               return;
             }
 
@@ -691,6 +796,7 @@ class RateLimitMonitor {
               force
             ))
           ) {
+            refreshSucceeded = true;
             return;
           }
 
@@ -706,6 +812,7 @@ class RateLimitMonitor {
             }
 
             if (appServerResult.found) {
+              refreshSucceeded = true;
               return;
             }
 
@@ -798,7 +905,15 @@ class RateLimitMonitor {
       this.lastError = usageApiError;
       this.lastObservation = result.data;
       this.sessionFileByProfileId.set(activeProfileId, result.data.filePath);
-      await this.profileManager.recordRateLimitObservation(activeProfileId, result.data);
+      if (this.profileManager.recordRateLimitObservationWithResult) {
+        await this.profileManager.recordRateLimitObservationWithResult(
+          activeProfileId,
+          result.data
+        );
+      } else {
+        await this.profileManager.recordRateLimitObservation(activeProfileId, result.data);
+      }
+      refreshSucceeded = true;
       this.setRefreshResult({
         source: 'localSessions',
         outcome: 'estimate',
@@ -822,6 +937,23 @@ class RateLimitMonitor {
           error: this.lastError,
           force: Boolean(force)
         });
+      }
+    } finally {
+      if (coordinatedProfileId && refreshClaim) {
+        try {
+          this.profileManager.completeRateLimitRefresh(
+            coordinatedProfileId,
+            refreshClaim,
+            refreshSucceeded
+          );
+        } catch (error) {
+          if (this.logger) {
+            this.logger.warn('Failed to complete the shared rate-limit refresh lease.', {
+              profileId: coordinatedProfileId,
+              error: error && error.message ? error.message : String(error)
+            });
+          }
+        }
       }
     }
   }

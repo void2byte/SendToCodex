@@ -67,6 +67,7 @@ function createRateLimitProfile(id, primaryRemaining, weeklyRemaining, now) {
 
 function loadRateLimitMonitor(options = {}) {
   const workspaceConfig = options.workspaceConfig || createWorkspaceConfig();
+  const warningCalls = [];
   const mock = createMockVscode({
     overrides: {
       EventEmitter: class EventEmitter {
@@ -83,6 +84,12 @@ function loadRateLimitMonitor(options = {}) {
       },
       window: {
         showInformationMessage: async () => undefined,
+        showWarningMessage: async (...args) => {
+          warningCalls.push(args);
+          return options.warningSelection
+            ? options.warningSelection(...args)
+            : undefined;
+        },
         showQuickPick: async (items, quickPickOptions) => {
           mock.quickPickCalls.push({ items, options: quickPickOptions });
           return options.quickPickSelection
@@ -93,10 +100,11 @@ function loadRateLimitMonitor(options = {}) {
     }
   });
   const restore = installMockVscode(mock.vscode);
+  delete require.cache[require.resolve('../../src/profiles/paidLimitResetPrompt')];
   delete require.cache[require.resolve('../../src/profiles/rateLimitMonitor')];
   const { RateLimitMonitor } = require('../../src/profiles/rateLimitMonitor');
   restore();
-  return { RateLimitMonitor, mock, workspaceConfig };
+  return { RateLimitMonitor, mock, warningCalls, workspaceConfig };
 }
 
 test('Usage API observations can update a stale saved profile plan', () => {
@@ -156,6 +164,112 @@ test('low-usage switch prompt is rate-limited after dismissal', async () => {
 
   assert.equal(mock.quickPickCalls.length, 1);
   assert.deepEqual(mock.commandCalls, []);
+});
+
+test('low-usage switch prompt can reappear after an out-of-schedule reset', async () => {
+  const now = Date.now();
+  const promptState = createStateBucket();
+  const { RateLimitMonitor, mock } = loadRateLimitMonitor({
+    quickPickSelection: () => []
+  });
+  const profiles = [
+    createRateLimitProfile('active-profile', 4, 80, now),
+    createRateLimitProfile('candidate-profile', 80, 80, now)
+  ];
+  const profileManager = {
+    context: { globalState: promptState },
+    listProfiles: async () => profiles
+  };
+
+  const firstMonitor = new RateLimitMonitor(profileManager, null);
+  await firstMonitor.maybeSuggestLowUsageSwitch('active-profile');
+
+  profiles[0].rateLimitState.primary.unexpectedResetCount = 1;
+  const secondMonitor = new RateLimitMonitor(profileManager, null);
+  await secondMonitor.maybeSuggestLowUsageSwitch('active-profile');
+
+  assert.equal(mock.quickPickCalls.length, 2);
+  assert.deepEqual(mock.commandCalls, []);
+});
+
+test('out-of-schedule reset dialog can zero all paid profile limits', async () => {
+  const { RateLimitMonitor, warningCalls } = loadRateLimitMonitor({
+    warningSelection: (...args) => args[2]
+  });
+  const resetCalls = [];
+  const monitor = new RateLimitMonitor({
+    resetPaidProfileRateLimits: async (resetDetectedAt) => {
+      resetCalls.push(resetDetectedAt);
+      return 3;
+    }
+  }, null);
+  const resetDetectedAt = Date.now();
+
+  assert.equal(
+    await monitor.maybeOfferPaidProfileLimitReset(
+      { id: 'active-profile', name: 'Active profile' },
+      {
+        unexpectedResetWindows: ['primary', 'secondary'],
+        observedAt: resetDetectedAt
+      }
+    ),
+    true
+  );
+
+  assert.equal(warningCalls.length, 1);
+  assert.equal(warningCalls[0][1].modal, true);
+  assert.deepEqual(resetCalls, [resetDetectedAt]);
+});
+
+test('account-only early reset leaves every other paid profile counter unchanged', async () => {
+  const { RateLimitMonitor, warningCalls } = loadRateLimitMonitor({
+    warningSelection: (...args) => args[3]
+  });
+  const resetCalls = [];
+  const monitor = new RateLimitMonitor({
+    resetPaidProfileRateLimits: async (resetDetectedAt) => {
+      resetCalls.push(resetDetectedAt);
+      return 3;
+    }
+  }, null);
+
+  assert.equal(
+    await monitor.maybeOfferPaidProfileLimitReset(
+      { id: 'active-profile', name: 'Active profile' },
+      {
+        unexpectedResetWindows: ['primary'],
+        observedAt: Date.now()
+      }
+    ),
+    false
+  );
+
+  assert.equal(warningCalls.length, 1);
+  assert.match(warningCalls[0][1].detail, /keep every other stored counter unchanged/i);
+  assert.deepEqual(resetCalls, []);
+});
+
+test('dismissing the early-reset decision leaves every other counter unchanged', async () => {
+  const { RateLimitMonitor } = loadRateLimitMonitor();
+  const resetCalls = [];
+  const monitor = new RateLimitMonitor({
+    resetPaidProfileRateLimits: async (resetDetectedAt) => {
+      resetCalls.push(resetDetectedAt);
+      return 3;
+    }
+  }, null);
+
+  assert.equal(
+    await monitor.maybeOfferPaidProfileLimitReset(
+      { id: 'active-profile', name: 'Active profile' },
+      {
+        unexpectedResetWindows: ['secondary'],
+        observedAt: Date.now()
+      }
+    ),
+    false
+  );
+  assert.deepEqual(resetCalls, []);
 });
 
 test('low-usage switch prompt checkbox can disable future prompts', async () => {

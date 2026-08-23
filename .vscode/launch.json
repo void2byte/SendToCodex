@@ -2,28 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Codex Multitool (Isolated)",
-      "type": "extensionHost",
-      "request": "launch",
-      "args": [
-        "--user-data-dir=${workspaceFolder}/.vscode-test/user-data",
-        "--extensions-dir=${workspaceFolder}/.vscode-test/extensions",
-        "--disable-extensions",
-        "--disable-workspace-trust",
-        "--skip-welcome",
-        "--skip-release-notes",
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "--enable-proposed-api=screph.codex-terminal-recorder"
-      ]
-    },
-    {
-      "name": "Run Codex Multitool (With User Extensions)",
+      "name": "Run Codex Multitool",
       "type": "extensionHost",
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "--enable-proposed-api=screph.codex-terminal-recorder"
-      ]
+        "--enable-proposed-api",
+        "screph.codex-terminal-recorder"
+      ],
+      "outFiles": []
     }
   ]
 }

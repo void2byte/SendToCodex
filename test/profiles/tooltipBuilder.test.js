@@ -91,7 +91,10 @@ test('profile tooltip keeps weekly limit and reset countdown inside the limits t
       ])
     );
 
-    assert.match(tooltip.value, /5H 60% 1h<br>W 75% 1d/);
+    assert.match(
+      tooltip.value,
+      /5H 60% remaining \\- resets in 1h<br>W 75% remaining \\- resets in 1d/
+    );
     assert.doesNotMatch(tooltip.value, /\\\| W/);
     assert.match(tooltip.value, /\| Account \| Plan \| Limits \| Windows \|/);
     assert.match(tooltip.value, /\$\(window\) This window, Other Workspace/);
@@ -101,7 +104,7 @@ test('profile tooltip keeps weekly limit and reset countdown inside the limits t
     );
     assert.match(
       tooltip.value,
-      /<font color="#858585">5H 0% 2d<br>W 0% 2d<\/font>/
+      /<font color="#858585">5H 0% remaining \\- resets in 2d<br>W 0% remaining \\- resets in 2d<\/font>/
     );
     assert.doesNotMatch(tooltip.value, /ACTIVE/);
     assert.doesNotMatch(tooltip.value, /1 other window:/);

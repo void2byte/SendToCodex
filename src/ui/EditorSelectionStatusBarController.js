@@ -17,7 +17,10 @@ class EditorSelectionStatusBarController {
     );
     this.statusBarItem.command = SEND_EDITOR_TO_CODEX_COMMAND;
     this.statusBarItem.name = 'Send Selection to Codex';
+    this.statusBarItem.text = `$(code) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
+    this.statusBarItem.tooltip = 'Send the active editor selection to Codex Chat.';
     this.disposables = [];
+    this.isVisible = false;
     this.lastVisibilityState = undefined;
   }
 
@@ -39,34 +42,27 @@ class EditorSelectionStatusBarController {
   async refresh() {
     const configuration = loadConfiguration();
     if (!configuration.sendToCodexEnabled) {
-      this.hideWithReason('send-disabled');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'send-disabled');
       return;
     }
 
     if (!this.codexAvailabilityController.isAvailable()) {
-      this.hideWithReason('codex-unavailable');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'codex-unavailable');
       return;
     }
 
     if (!configuration.showCodexEditorSelectionButton) {
-      this.hideWithReason('disabled-by-setting');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'disabled-by-setting');
       return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!hasSupportedEditorSelection(editor)) {
-      this.hideWithReason('no-file-selection');
-      this.statusBarItem.hide();
+      this.setVisible(false, 'no-file-selection');
       return;
     }
 
-    this.statusBarItem.text = `$(code) Send to Codex (${SEND_TO_CODEX_SHORTCUT_LABEL})`;
-    this.statusBarItem.tooltip = 'Send the active editor selection to Codex Chat.';
-    this.statusBarItem.show();
-    this.logVisibilityState('visible');
+    this.setVisible(true, 'visible');
   }
 
   dispose() {
@@ -77,7 +73,16 @@ class EditorSelectionStatusBarController {
     this.statusBarItem.dispose();
   }
 
-  hideWithReason(reason) {
+  setVisible(visible, reason) {
+    if (this.isVisible !== visible) {
+      this.isVisible = visible;
+      if (visible) {
+        this.statusBarItem.show();
+      } else {
+        this.statusBarItem.hide();
+      }
+    }
+
     this.logVisibilityState(reason);
   }
 

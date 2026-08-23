@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  formatAbsoluteTimestamp,
   formatCompactRateSummary,
   getProfileRateStatus,
   getWindowRemainingPercent
@@ -23,6 +24,70 @@ function createProfile(rateLimitState, overrides = {}) {
 
 const ACTIVE_PROFILE_OPTIONS = { activeProfileId: 'profile-1' };
 const INACTIVE_PROFILE_OPTIONS = { activeProfileId: 'other-profile' };
+
+test('unused windows stay at full capacity without starting a countdown', () => {
+  const now = Date.parse('2026-07-26T10:00:00.000Z');
+  const status = getProfileRateStatus(
+    createProfile({
+      observedAt: now,
+      sourceFile: APP_SERVER_SOURCE,
+      primary: {
+        usedPercent: 0,
+        resetAt: null,
+        windowMinutes: 300
+      },
+      secondary: {
+        usedPercent: 0,
+        resetAt: null,
+        windowMinutes: 10_080
+      }
+    }),
+    now,
+    ACTIVE_PROFILE_OPTIONS
+  );
+
+  assert.equal(status.windowNotStarted, true);
+  assert.equal(status.primary.unstarted, true);
+  assert.equal(status.secondary.unstarted, true);
+  assert.equal(status.cooldownActive, false);
+  assert.equal(status.compactText, 'Window not started - starts on first use');
+  assert.equal(
+    formatCompactRateSummary(status, now, {
+      includePrimaryCountdown: true,
+      includeSecondaryCountdown: true,
+      percentageMode: 'remaining',
+      includePercentageLabel: true
+    }),
+    '5H 100% remaining - starts on first use | W 100% remaining - starts on first use'
+  );
+});
+
+test('a backend reset timestamp starts the countdown even when usage rounds to zero', () => {
+  const now = Date.parse('2026-07-26T10:00:00.000Z');
+  const status = getProfileRateStatus(
+    createProfile({
+      observedAt: now,
+      sourceFile: APP_SERVER_SOURCE,
+      primary: {
+        usedPercent: 0,
+        resetAt: now + 5 * 60 * 60 * 1000,
+        windowMinutes: 300
+      }
+    }),
+    now,
+    ACTIVE_PROFILE_OPTIONS
+  );
+
+  assert.equal(status.windowNotStarted, false);
+  assert.equal(status.primary.unstarted, false);
+  assert.match(
+    formatCompactRateSummary(status, now, {
+      includePrimaryCountdown: true,
+      percentageMode: 'remaining'
+    }),
+    /^5H 100% 5h/
+  );
+});
 
 test('rate-limit display uses fresh Usage API observations', () => {
   const now = Date.parse('2026-05-20T10:00:00.000Z');
@@ -148,6 +213,77 @@ test('remaining limits do not hide a reported one-percent usage change', () => {
       percentageMode: 'remaining'
     }),
     '5H 99% | W 99%'
+  );
+});
+
+test('an active limit window is available until its usage is exhausted', () => {
+  const now = Date.parse('2026-05-20T10:00:00.000Z');
+  const availableStatus = getProfileRateStatus(
+    createProfile({
+      observedAt: now,
+      sourceFile: USAGE_API_SOURCE,
+      primary: {
+        usedPercent: 40,
+        resetAt: now + 60 * 60 * 1000,
+        windowMinutes: 300
+      },
+      secondary: null
+    }),
+    now,
+    ACTIVE_PROFILE_OPTIONS
+  );
+  const exhaustedStatus = getProfileRateStatus(
+    createProfile({
+      observedAt: now,
+      sourceFile: USAGE_API_SOURCE,
+      primary: {
+        usedPercent: 100,
+        resetAt: now + 60 * 60 * 1000,
+        windowMinutes: 300
+      },
+      secondary: null
+    }),
+    now,
+    ACTIVE_PROFILE_OPTIONS
+  );
+
+  assert.equal(availableStatus.cooldownActive, false);
+  assert.equal(availableStatus.compactText, 'Available');
+  assert.equal(exhaustedStatus.cooldownActive, true);
+  assert.match(exhaustedStatus.compactText, /Limit exhausted - resets in 1h/);
+});
+
+test('absolute timestamps use an unambiguous year-first local format', () => {
+  const formatted = formatAbsoluteTimestamp(new Date(2026, 6, 24, 13, 5, 9).getTime());
+
+  assert.match(formatted, /^2026-07-24 13:05:09 UTC(?:[+-]\d{2}:\d{2})?$/);
+});
+
+test('verbose rate summaries label remaining percentages explicitly', () => {
+  const now = Date.parse('2026-05-20T10:00:00.000Z');
+  const status = getProfileRateStatus(
+    createProfile({
+      observedAt: now,
+      sourceFile: USAGE_API_SOURCE,
+      primary: {
+        usedPercent: 40,
+        resetAt: now + 60 * 60 * 1000,
+        windowMinutes: 300
+      },
+      secondary: null
+    }),
+    now,
+    ACTIVE_PROFILE_OPTIONS
+  );
+
+  assert.equal(
+    formatCompactRateSummary(status, now, {
+      includePrimaryCountdown: true,
+      includeSecondaryCountdown: false,
+      percentageMode: 'remaining',
+      includePercentageLabel: true
+    }),
+    '5H 60% remaining - resets in 1h | W n/a'
   );
 });
 
@@ -365,7 +501,7 @@ test('inactive profile display uses local session estimates', () => {
   assert.equal(getWindowRemainingPercent(status.secondary, now), 80);
 });
 
-test('active profile display ignores stale Usage API observations', () => {
+test('active profile display keeps stale Usage API observations as estimates', () => {
   const now = Date.parse('2026-05-20T10:00:00.000Z');
   const status = getProfileRateStatus(
     createProfile({
@@ -387,9 +523,10 @@ test('active profile display ignores stale Usage API observations', () => {
   );
 
   assert.equal(status.hasFreshUsageApiData, false);
-  assert.equal(status.isEstimatedRateLimitData, false);
-  assert.equal(status.primary, null);
-  assert.equal(status.secondary, null);
+  assert.equal(status.isEstimatedRateLimitData, true);
+  assert.equal(status.sourceType, 'usageApi');
+  assert.equal(getWindowRemainingPercent(status.primary, now), 90);
+  assert.equal(getWindowRemainingPercent(status.secondary, now), 90);
 });
 
 test('inactive profile display keeps stale Usage API observations as estimates', () => {

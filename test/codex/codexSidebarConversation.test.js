@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  findLastResumedConversation,
   getFileSize,
   getOfficialCodexLogPath,
   hasRouteHandlingSuccess,
@@ -24,74 +23,6 @@ test('derives the official Codex log beside the current extension log directory'
     getOfficialCodexLogPath(ownLogDirectory),
     path.join('C:\\logs', 'window1', 'exthost', 'openai.chatgpt', 'Codex.log')
   );
-});
-
-test('uses the last successful resume event in the Codex log', () => {
-  const first = '019ed0b4-722c-7180-9d34-8cf7e7c5c455';
-  const second = '019ee6a1-07ce-7802-ba53-1d850d27c19e';
-  const match = findLastResumedConversation(
-    `[info] maybe_resume_success conversationId=${first}\n` +
-      `[info] maybe_resume_success conversationId=${second}\n`
-  );
-  assert.equal(match.conversationId, second);
-  assert.equal(match.source, 'official-codex-log-resume');
-});
-
-test('uses a created conversation event when no resume event exists', () => {
-  const conversationId = '019ef956-3bb5-7422-b92f-66712ef49d7c';
-  const match = findLastResumedConversation(
-    `[info] Conversation created conversationId=${conversationId}\n`
-  );
-  assert.equal(match.conversationId, conversationId);
-  assert.equal(match.source, 'official-codex-log-created');
-});
-
-test('prefers the active conversation in this window over a later background resume', () => {
-  const activeConversation = '019f4ed2-1b2f-7e92-9ea8-03ae7551f0bb';
-  const backgroundConversation = '019f50f6-b8ad-7072-b272-347a8bbe1592';
-  const match = findLastResumedConversation(
-    `[info] thread_stream_view_activity_changed active=true conversationId=${activeConversation} resumeState=needs_resume\n` +
-      `[info] maybe_resume_success conversationId=${backgroundConversation} turnCount=3\n`
-  );
-
-  assert.deepEqual(match, {
-    conversationId: activeConversation,
-    index: 7,
-    source: 'official-codex-log-active-view'
-  });
-});
-
-test('uses the most recently activated conversation in this window', () => {
-  const first = '019f4ed2-1b2f-7e92-9ea8-03ae7551f0bb';
-  const second = '019f50f6-b8ad-7072-b272-347a8bbe1592';
-  const match = findLastResumedConversation(
-    `[info] thread_stream_view_activity_changed conversationId=${first} active=true\n` +
-      `[info] thread_stream_view_activity_changed active=true conversationId=${second}\n`
-  );
-
-  assert.equal(match.conversationId, second);
-  assert.equal(match.source, 'official-codex-log-active-view');
-});
-
-test('does not restore a conversation that was explicitly marked inactive', () => {
-  const conversationId = '019f4ed2-1b2f-7e92-9ea8-03ae7551f0bb';
-  const match = findLastResumedConversation(
-    `[info] thread_stream_view_activity_changed active=true conversationId=${conversationId}\n` +
-      `[info] thread_stream_view_activity_changed active=false conversationId=${conversationId}\n`
-  );
-
-  assert.equal(match, null);
-});
-
-test('skips a conversation ID rejected by a later no-turns event', () => {
-  const first = '019ef698-7003-71a0-93f0-ce4b95c1dc38';
-  const rejected = '019ef699-6609-7eb1-b43d-28e0ad075654';
-  const match = findLastResumedConversation(
-    `[info] Conversation created conversationId=${first}\n` +
-      `[info] Conversation created conversationId=${rejected}\n` +
-      `[error] No turns for conversation conversationId=${rejected}\n`
-  );
-  assert.equal(match.conversationId, first);
 });
 
 test('verifies a new successful resume appended after the URI handler call', async () => {

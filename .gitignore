@@ -1,5 +1,7 @@
 node_modules
 .codex-terminal-logs/
+.codex-counter-activation/
+codex_artifacts/
 .npm-cache/
 .tmp/
 .vscode-test/

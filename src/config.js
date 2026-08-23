@@ -8,6 +8,7 @@ const TERMINAL_CAPTURE_API_HINT =
   'Terminal capture APIs are unavailable in this VS Code build. Update VS Code to a recent stable version.';
 const DIAGNOSTICS_LOGGING_ENABLED_DEFAULT = false;
 const DIAGNOSTICS_LOG_FILE_ENABLED_DEFAULT = false;
+const TERMINAL_RECORDING_ENABLED_DEFAULT = false;
 const SEND_TO_CODEX_ENABLED_SETTING = 'sendToCodexEnabled';
 const SEND_TO_CODEX_ENABLED_DEFAULT = true;
 const SELECTION_PAIR_RETENTION_COUNT_DEFAULT = 50;
@@ -62,7 +63,7 @@ function loadConfiguration() {
     : TERMINAL_CONTEXT_SEND_MODES.contextBundle;
 
   return {
-    enabled: config.get('enabled', true),
+    enabled: config.get('enabled', TERMINAL_RECORDING_ENABLED_DEFAULT),
     sendToCodexEnabled: config.get(
       SEND_TO_CODEX_ENABLED_SETTING,
       SEND_TO_CODEX_ENABLED_DEFAULT
@@ -117,6 +118,7 @@ module.exports = {
   SELECTION_PAIR_RETENTION_COUNT_DEFAULT,
   SEND_TO_CODEX_ENABLED_DEFAULT,
   SEND_TO_CODEX_ENABLED_SETTING,
+  TERMINAL_RECORDING_ENABLED_DEFAULT,
   TERMINAL_CAPTURE_API_HINT,
   SELECTION_TRACKING_STRATEGIES,
   TERMINAL_CONTEXT_SEND_MODES,
