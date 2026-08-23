@@ -37,6 +37,22 @@ jobs:
           path: "*.vsix"
           if-no-files-found: error
 
+      - name: Publish to Visual Studio Marketplace
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VSCE_PAT)) {
+            throw "Repository secret VSCE_PAT is required to publish release tags."
+          }
+          $version = node -p "require('./package.json').version"
+          $packagePath = "codex-terminal-recorder-$version.vsix"
+          npx --cache .npm-cache @vscode/vsce publish `
+            --packagePath $packagePath `
+            --no-dependencies `
+            --allow-proposed-apis terminalDataWriteEvent
+
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

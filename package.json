@@ -2,7 +2,7 @@
   "name": "codex-terminal-recorder",
   "displayName": "Codex Multitool",
   "description": "Manage Codex accounts, usage limits and protected notes, and send terminal or editor context to Codex from VS Code.",
-  "version": "0.0.92",
+  "version": "0.0.93",
   "publisher": "screph",
   "license": "MIT",
   "icon": "media/icon.png",

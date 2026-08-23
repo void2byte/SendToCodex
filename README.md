@@ -18,7 +18,7 @@ Codex Multitool combines an account manager, per-profile usage monitor and conte
 - Send terminal selections, editor selections, files and folders to Codex with focused, reproducible context.
 - Keep concurrent VS Code windows synchronized without losing profile or rate-limit updates.
 
-## What's new in 0.0.92
+## What's new in 0.0.93
 
 - Protected account notebooks with TOTP support.
 - Encrypted daily recovery snapshots and a portable encrypted profile vault.
